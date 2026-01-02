@@ -17,18 +17,19 @@ interface Team {
 
 interface TeamsResponse {
   success: boolean;
+  source?: "GRID" | string;
   code?: string;
   teams: Team[];
 }
 
 export default function ScoutingEngine({ onReportGenerated }: { onReportGenerated: (report: TeamReport, source: string) => void }) {
   const [teamName, setTeamName] = useState("");
+  const [teamId, setTeamId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [demoMode, setDemoMode] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -42,14 +43,7 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
         if (data.success) {
           setTeams(data.teams);
         } else {
-          // If GRID fails and demo mode is off, show empty list
-          if (demoMode) {
-            // In demo mode, we can fetch demo teams from a separate endpoint or use local data
-            // For now, we'll just show empty and let user know to enable demo mode
-            setTeams([]);
-          } else {
-            setTeams([]);
-          }
+          setTeams([]);
         }
       } catch (err) {
         console.error("Failed to fetch teams:", err);
@@ -62,28 +56,12 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
     }, 250);
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery, demoMode]);
+  }, [searchQuery]);
 
-  // Fetch initial teams when popover opens
+  // Open popover on focus (no API call - just show "Start typing..." message)
   const handleInputFocus = useCallback(() => {
     setOpen(true);
-    if (teams.length === 0 && searchQuery === "") {
-      // Fetch default teams when opening
-      fetch(`/api/teams?q=&limit=10`)
-        .then((res) => res.json())
-        .then((data: TeamsResponse) => {
-          if (data.success) {
-            setTeams(data.teams);
-          } else {
-            setTeams([]);
-          }
-        })
-        .catch((err) => {
-          console.error("Failed to fetch teams:", err);
-          setTeams([]);
-        });
-    }
-  }, [teams.length, searchQuery]);
+  }, []);
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -104,8 +82,9 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       e.preventDefault();
       const selectedTeam = teams[highlightedIndex];
       setTeamName(selectedTeam.name);
+      setTeamId(selectedTeam.id || null);
       setOpen(false);
-      setSearchQuery("");
+      setSearchQuery(selectedTeam.name);
       setHighlightedIndex(-1);
     } else if (e.key === "Escape") {
       setOpen(false);
@@ -115,15 +94,22 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
 
   const handleTeamSelect = (team: Team) => {
     setTeamName(team.name);
+    setTeamId(team.id || null);
     setSearchQuery(team.name); // Show selected team in input
     setOpen(false);
     setHighlightedIndex(-1);
-    inputRef.current?.blur();
+    // Focus back to input after selection
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teamName.trim()) return;
+    if (!teamName.trim() || !teamId) {
+      setError("Please select a team from the dropdown.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -132,62 +118,33 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       const response = await fetch("/api/scout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teamName, game: "lol" }),
+        body: JSON.stringify({ teamId, game: "lol" }),
       });
 
       const result: ScoutResponse = await response.json();
 
       if (result.success && result.data) {
-        // Real data from GRID
         onReportGenerated(result.data, result.source || "GRID");
       } else {
-        // Explicit failure - only use demo if demo mode is ON
-        if (demoMode) {
-          try {
-            const demoDataResponse = await fetch("/demo-data.json");
-            const demoData = await demoDataResponse.json();
-            const matchedTeam = demoData.teams[teamName] || demoData.teams["Cloud9"];
-            if (matchedTeam) {
-              onReportGenerated(matchedTeam, "Demo Mode");
-              setError("Live scouting unavailable. Showing demo data (Demo Mode enabled).");
-            } else {
-              setError("Live scouting failed and no demo data available for this team.");
-            }
-          } catch (demoErr) {
-            setError("Live scouting failed and could not load demo data.");
-          }
+        // Show explicit error based on code
+        if (result.code === "MISSING_API_KEY") {
+          setError("Live scouting failed: GRID API key not configured.");
+        } else if (result.code === "GRID_FETCH_FAILED") {
+          setError("Live scouting failed: GRID connection failed.");
+        } else if (result.code === "TEAM_NOT_FOUND") {
+          setError("Team not found in GRID database.");
+        } else if (result.code === "NO_SERIES_FOUND") {
+          setError("No recent series found for this team.");
+        } else if (result.code === "PARSE_FAILED") {
+          setError("Failed to parse match data. Please try again.");
+        } else if (result.code === "SCOUT_NOT_IMPLEMENTED") {
+          setError("Live scouting is not yet implemented.");
         } else {
-          // Demo mode is OFF - show explicit error
-          if (result.code === "MISSING_API_KEY") {
-            setError("Live scouting failed: GRID API key not configured. Enable Demo Mode to view demo data.");
-          } else if (result.code === "GRID_FETCH_FAILED") {
-            setError("Live scouting failed: GRID connection failed. Enable Demo Mode to view demo data.");
-          } else if (result.code === "SCOUT_NOT_IMPLEMENTED") {
-            setError("Live scouting is not yet implemented. Enable Demo Mode to view demo data.");
-          } else {
-            setError("Live scouting failed. Enable Demo Mode to view demo data.");
-          }
+          setError(result.error || "Live scouting failed. Please try again.");
         }
       }
     } catch (err) {
-      // Network error or other exception
-      if (demoMode) {
-        try {
-          const demoDataResponse = await fetch("/demo-data.json");
-          const demoData = await demoDataResponse.json();
-          const matchedTeam = demoData.teams[teamName] || demoData.teams["Cloud9"];
-          if (matchedTeam) {
-            onReportGenerated(matchedTeam, "Demo Mode");
-            setError("Network error. Showing demo data (Demo Mode enabled).");
-          } else {
-            setError("Network error and no demo data available for this team.");
-          }
-        } catch (demoErr) {
-          setError("Network error and could not load demo data.");
-        }
-      } else {
-        setError("Network error. Enable Demo Mode to view demo data.");
-      }
+      setError("Network error. Please check your connection and try again.");
     } finally {
       setLoading(false);
     }
@@ -200,29 +157,13 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-          {/* Demo Mode Toggle */}
-          <div className="flex items-center gap-2 pb-2 border-b">
-            <label className="flex items-center gap-2 cursor-pointer text-sm">
-              <input
-                type="checkbox"
-                checked={demoMode}
-                onChange={(e) => setDemoMode(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
-              />
-              <span className="text-muted-foreground">Demo Mode</span>
-            </label>
-            {demoMode && (
-              <span className="text-xs text-muted-foreground">(Demo data will be used when live scouting fails)</span>
-            )}
-          </div>
-
           <div className="flex gap-2">
             <Popover open={open} onOpenChange={setOpen}>
               <div className="relative flex-1">
                 <PopoverTrigger asChild>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                <Input
+                  <Input
                   ref={inputRef}
                   type="text"
                   value={searchQuery}
@@ -232,13 +173,18 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                     // Clear team selection when user types something different
                     if (value !== teamName) {
                       setTeamName("");
+                      setTeamId(null);
                     }
                     setOpen(true);
                     setHighlightedIndex(-1);
                   }}
                   onFocus={handleInputFocus}
+                  onBlur={(e) => {
+                    // Don't close popover on blur - let onInteractOutside handle it
+                    // This prevents flash-close when clicking items
+                  }}
                   onKeyDown={handleKeyDown}
-                  placeholder="Opponent Team Name (e.g., Cloud9, Sentinels)"
+                  placeholder="Start typing to search teams..."
                   className="pl-10 h-12"
                   disabled={loading}
                 />
@@ -248,11 +194,25 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                   className="p-0 w-[var(--radix-popover-trigger-width)]"
                   align="start"
                   sideOffset={4}
+                  onOpenAutoFocus={(e) => e.preventDefault()}
+                  onCloseAutoFocus={(e) => e.preventDefault()}
+                  onInteractOutside={(e) => {
+                    // Don't close if clicking inside the popover content or on the input trigger
+                    const target = e.target as HTMLElement;
+                    const popoverContent = e.currentTarget;
+                    if (
+                      popoverContent.contains(target) ||
+                      target === inputRef.current ||
+                      target.closest('input')
+                    ) {
+                      e.preventDefault();
+                    }
+                  }}
                 >
                   <Command>
                     <CommandList ref={listRef}>
                       <CommandEmpty>
-                        {searchQuery ? "No teams found." : "Type to search teams..."}
+                        {searchQuery ? "No teams found." : "Start typing to search teams..."}
                       </CommandEmpty>
                       <CommandGroup>
                         {teams.map((team, index) => (
@@ -260,6 +220,15 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                             key={team.id || team.name}
                             value={team.name}
                             onSelect={() => handleTeamSelect(team)}
+                            onMouseDown={(e) => {
+                              // Prevent input blur from closing popover before click completes
+                              e.preventDefault();
+                            }}
+                            onClick={(e) => {
+                              // Ensure click triggers selection
+                              e.preventDefault();
+                              handleTeamSelect(team);
+                            }}
                             className={cn(
                               "cursor-pointer",
                               highlightedIndex === index && "bg-accent"
@@ -280,7 +249,7 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                 </PopoverContent>
               </div>
             </Popover>
-            <Button type="submit" size="lg" disabled={loading || !teamName.trim()} className="h-12 px-6">
+            <Button type="submit" size="lg" disabled={loading || !teamName.trim() || !teamId} className="h-12 px-6">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Generate Report
             </Button>

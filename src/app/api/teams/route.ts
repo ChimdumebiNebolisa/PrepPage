@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import demoData from "../../../../public/demo-data.json";
+import { safeJson } from "@/lib/http";
 
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 
@@ -10,115 +10,19 @@ export async function GET(req: NextRequest) {
 
   const GRID_API_KEY = process.env.GRID_API_KEY;
 
-  // Helper to get demo teams (only used when demo mode is explicitly enabled)
-  const getDemoTeams = () => {
-    const teamKeys = Object.keys(demoData.teams);
-    if (!q) {
-      // Return default demo teams when q is empty
-      return teamKeys.slice(0, Math.min(limit, teamKeys.length)).map((key) => ({
-        name: demoData.teams[key as keyof typeof demoData.teams].teamName,
-      }));
-    }
-    // Filter demo teams by query
-    return teamKeys
-      .filter((key) => {
-        const team = demoData.teams[key as keyof typeof demoData.teams];
-        return team.teamName.toLowerCase().includes(q.toLowerCase());
-      })
-      .slice(0, limit)
-      .map((key) => ({
-        name: demoData.teams[key as keyof typeof demoData.teams].teamName,
-      }));
-  };
-
-  // If q is empty:
-  // - If GRID_API_KEY exists: try to get a starter list from GRID (e.g., contains: "a")
-  // - Otherwise: return empty list (UI will show "Type to search")
-  if (!q) {
-    if (!GRID_API_KEY || GRID_API_KEY === "YOUR_GRID_API_KEY") {
-      return NextResponse.json(
-        {
-          success: true,
-          teams: [],
-        },
-        { status: 200 }
-      );
-    }
-
-    // Try to get a starter list from GRID
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-    try {
-      const query = `
-        query TeamSearch($search: String!, $first: Int!) {
-          teams(filter: { name: { contains: $search } }, first: $first) {
-            edges {
-              node {
-                id
-                name
-              }
-            }
-          }
-        }
-      `;
-
-      const response = await fetch(GRID_GRAPHQL_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": GRID_API_KEY,
-        },
-        body: JSON.stringify({
-          query,
-          variables: {
-            search: "a", // Cheap query to get starter list
-            first: limit,
-          },
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (data.errors) {
-        throw new Error(data.errors.map((e: any) => e.message).join(", "));
-      }
-
-      const teams =
-        data.data?.teams?.edges?.map((edge: any) => ({
-          id: edge.node.id,
-          name: edge.node.name,
-        })) || [];
-
-      return NextResponse.json(
-        {
-          success: true,
-          teams,
-        },
-        { status: 200 }
-      );
-    } catch (err: any) {
-      clearTimeout(timeoutId);
-      // Return empty list on error (no auto-fallback to demo)
-      return NextResponse.json(
-        {
-          success: false,
-          code: "GRID_FETCH_FAILED",
-          teams: [],
-        },
-        { status: 200 }
-      );
-    }
+  // If q is empty, return empty list (UI will show "Start typing...")
+  if (!q.trim()) {
+    return NextResponse.json(
+      {
+        success: true,
+        source: "GRID",
+        teams: [],
+      },
+      { status: 200 }
+    );
   }
 
-  // If no API key and q is non-empty, return error (no demo fallback)
+  // If no API key, return error
   if (!GRID_API_KEY || GRID_API_KEY === "YOUR_GRID_API_KEY") {
     return NextResponse.json(
       {
@@ -126,7 +30,7 @@ export async function GET(req: NextRequest) {
         code: "MISSING_API_KEY",
         teams: [],
       },
-      { status: 200 }
+      { status: 503 }
     );
   }
 
@@ -167,27 +71,27 @@ export async function GET(req: NextRequest) {
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await safeJson(response, "teams_query");
 
     // Check for GraphQL errors
     if (data.errors) {
       throw new Error(data.errors.map((e: any) => e.message).join(", "));
     }
 
-    // Extract teams from response
+    // Extract teams from response - ensure each team has id and name
     const teams =
-      data.data?.teams?.edges?.map((edge: any) => ({
-        id: edge.node.id,
-        name: edge.node.name,
-      })) || [];
+      data.data?.teams?.edges
+        ?.map((edge: any) => ({
+          id: edge.node.id,
+          name: edge.node.name,
+        }))
+        .filter((team: any) => team.id && team.name) || [];
 
+    // Hard guard: success response MUST include source:"GRID" and valid teams
     return NextResponse.json(
       {
         success: true,
+        source: "GRID",
         teams,
       },
       { status: 200 }
@@ -196,13 +100,15 @@ export async function GET(req: NextRequest) {
     clearTimeout(timeoutId);
 
     // Return error instead of auto-fallback to demo
+    const errorMessage = err.message || "Unknown error";
     return NextResponse.json(
       {
         success: false,
         code: "GRID_FETCH_FAILED",
+        error: errorMessage.substring(0, 200),
         teams: [],
       },
-      { status: 200 }
+      { status: 502 }
     );
   }
 }
