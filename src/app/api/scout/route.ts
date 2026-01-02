@@ -42,20 +42,11 @@ export async function POST(req: NextRequest) {
       const data = await response.json();
       */
       
-      // For MVP, we simulate a small delay then return success if teamName is "Cloud9" or "Sentinels"
-      // to demonstrate the flow. Otherwise we "fail" to trigger demo fallback.
+      // For MVP, we simulate a small delay then throw an error to trigger the demo fallback.
+      // In a real implementation with a GRID key, the fetch above would be active.
       await new Promise(resolve => setTimeout(resolve, 1500));
       
-      if (teamName.toLowerCase() === "cloud9" || teamName.toLowerCase() === "sentinels") {
-         // This would normally be data from GRID
-         return NextResponse.json({
-            success: true,
-            source: "GRID",
-            data: null // The frontend will handle merging this or falling back
-         });
-      }
-
-      throw new Error("Team not found in GRID");
+      throw new Error("GRID API is not connected. Switching to Demo Mode.");
 
     } catch (err: any) {
       clearTimeout(timeoutId);
