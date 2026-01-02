@@ -57,5 +57,18 @@ describe('/api/teams', () => {
     expect(data.teams[0]).toHaveProperty('name');
     expect(data.source).not.toBe('Demo');
   });
+
+  it('returns 502 with GRID_FETCH_FAILED when GRID fetch fails', async () => {
+    process.env.GRID_API_KEY = 'test-key';
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
+
+    const req = new NextRequest('http://localhost:3000/api/teams?q=faze&limit=10');
+    const res = await GET(req);
+    expect(res.status).toBe(502);
+    const data = await res.json();
+    expect(data.success).toBe(false);
+    expect(data.code).toBe('GRID_FETCH_FAILED');
+    expect(data.teams).toEqual([]);
+  });
 });
 

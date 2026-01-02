@@ -7,9 +7,9 @@ Prep Page is a minimal web app that generates scouting reports for esports teams
 ## Features
 
 - **Landing Page**: Hero section with value proposition and "How it works"
-- **Team Search**: Typeahead search with debounced API calls (calls `/api/teams` with 250ms debounce)
-- **Report Generation**: Generates scouting reports from GRID API or demo data fallback
-- **Demo Fallback**: Automatically falls back to demo data when GRID API fails, times out (>5s), or API key is missing
+- **Team Search**: Typeahead search with debounced API calls (calls `/api/teams` with 250ms debounce). Shows "LIVE SEARCH" indicator when using GRID data. Falls back to demo teams toggle when API key is missing.
+- **Report Generation**: Always attempts GRID API first, falls back to demo data only on failure
+- **Demo Fallback**: Automatically falls back to demo data when GRID API fails, times out (>5s), or API key is missing. Reports show "LIVE" or "DEMO MODE" badge.
 - **Export**: Copy markdown to clipboard or download as `.md` file
 
 ## Quick Start
@@ -42,7 +42,8 @@ GRID_API_KEY=your_key_here
 
 **Important:**
 - Use `GRID_API_KEY` (server-side only), never `NEXT_PUBLIC_GRID_API_KEY`
-- Demo mode works without this variable
+- Live search requires `GRID_API_KEY` - without it, you'll see a notice and can toggle to use demo teams
+- Demo report generation works without this variable (automatic fallback)
 - All GRID API calls happen in Route Handlers (`src/app/api/*/route.ts`)
 - API key is never exposed to the browser
 
@@ -55,14 +56,16 @@ GRID_API_KEY=your_key_here
 
 ## User Flow
 
-1. User types team name in search field
-2. App calls `/api/teams` with debounced query
-3. User selects team from dropdown
-4. User clicks "Generate Report"
-5. App calls `/api/scout` with teamId
-6. On success: Report renders with "LIVE" badge
-7. On failure/timeout/missing key: App automatically fetches `/demo-data.json` and renders with "DEMO MODE" badge
-8. User can copy or download markdown
+1. User types team name in search field (minimum 2 characters recommended)
+2. App calls `/api/teams` with debounced query (250ms)
+3. If GRID_API_KEY is present: Shows "LIVE SEARCH" indicator with live team results
+4. If GRID_API_KEY is missing: Shows notice with option to toggle "Use Demo Teams"
+5. User selects team from dropdown
+6. User clicks "Generate Report"
+7. App always attempts `/api/scout` first (5 second timeout)
+8. On success: Report renders with "LIVE" badge
+9. On failure/timeout/missing key: App automatically fetches `/demo-data.json` and renders with "DEMO MODE" badge
+10. User can copy or download markdown
 
 ## Testing
 

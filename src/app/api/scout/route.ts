@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for full pipeline
+    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for full pipeline
 
     try {
       // Step 1: Find recent series for the team

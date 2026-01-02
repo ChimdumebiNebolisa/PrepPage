@@ -30,6 +30,9 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
   const [teams, setTeams] = useState<Team[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [searchMode, setSearchMode] = useState<"LIVE" | "DEMO" | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [useDemoTeams, setUseDemoTeams] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -37,6 +40,8 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
   useEffect(() => {
     if (!searchQuery.trim()) {
       setTeams([]);
+      setSearchMode(null);
+      setSearchError(null);
       return;
     }
 
@@ -46,12 +51,28 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
         const data: TeamsResponse = await response.json();
         if (data.success) {
           setTeams(data.teams);
+          setSearchMode("LIVE");
+          setSearchError(null);
         } else {
-          setTeams([]);
+          if (data.code === "MISSING_API_KEY") {
+            setSearchMode(null);
+            setSearchError("MISSING_API_KEY");
+            setTeams([]);
+          } else if (data.code === "GRID_FETCH_FAILED") {
+            setSearchMode(null);
+            setSearchError("GRID_FETCH_FAILED");
+            setTeams([]);
+          } else {
+            setSearchMode(null);
+            setSearchError(null);
+            setTeams([]);
+          }
         }
       } catch (err) {
         console.error("Failed to fetch teams:", err);
         setTeams([]);
+        setSearchMode(null);
+        setSearchError("GRID_FETCH_FAILED");
       }
     };
 
@@ -124,15 +145,32 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
     }, 0);
   };
 
+  // Handle demo team selection
+  const handleDemoTeamSelect = (teamName: string) => {
+    setTeamName(teamName);
+    setTeamId(null); // Demo teams don't have IDs
+    setUseDemoTeams(true);
+    setSearchQuery(teamName);
+    setOpen(false);
+    setHighlightedIndex(-1);
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 0);
+  };
+
   // Demo fallback function
-  const loadDemoData = async (): Promise<TeamReport | null> => {
+  const loadDemoData = async (preferredTeamName?: string): Promise<TeamReport | null> => {
     try {
       const response = await fetch("/demo-data.json");
       if (!response.ok) {
         return null;
       }
       const demoData: DemoData = await response.json();
-      // Use first team or try to match by name
+      // Try to match by team name first
+      if (preferredTeamName && demoData.teams[preferredTeamName]) {
+        return demoData.teams[preferredTeamName];
+      }
+      // Use first team as fallback
       const teamKeys = Object.keys(demoData.teams);
       if (teamKeys.length > 0) {
         const firstTeam = demoData.teams[teamKeys[0]];
@@ -147,13 +185,31 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teamName.trim() || !teamId) {
+    if (!teamName.trim()) {
+      setError("Please select a team from the dropdown.");
+      return;
+    }
+    // Allow demo teams (no teamId) to proceed
+    if (!teamId && !useDemoTeams) {
       setError("Please select a team from the dropdown.");
       return;
     }
 
     setLoading(true);
     setError(null);
+
+    // If using demo team, skip API call and go straight to demo
+    if (useDemoTeams && !teamId) {
+      const demoReport = await loadDemoData(teamName);
+      if (demoReport) {
+        onReportGenerated(demoReport, "Demo Mode");
+        setLoading(false);
+        return;
+      }
+      setError("Failed to load demo data.");
+      setLoading(false);
+      return;
+    }
 
     // Create timeout controller for 5 second timeout
     const controller = new AbortController();
@@ -172,7 +228,7 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       // Check if response is not ok (non-2xx)
       if (!response.ok) {
         // Try demo fallback
-        const demoReport = await loadDemoData();
+        const demoReport = await loadDemoData(teamName);
         if (demoReport) {
           onReportGenerated(demoReport, "Demo Mode");
           setLoading(false);
@@ -190,7 +246,7 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       }
 
       // API returned success:false - trigger demo fallback
-      const demoReport = await loadDemoData();
+      const demoReport = await loadDemoData(teamName);
       if (demoReport) {
         onReportGenerated(demoReport, "Demo Mode");
         setLoading(false);
@@ -198,12 +254,13 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       }
 
       setError("Failed to generate report. Demo data unavailable.");
-    } catch (err: any) {
+    } catch (err: unknown) {
       clearTimeout(timeoutId);
 
       // Check if it's an abort (timeout) or network error - try demo fallback
-      if (err.name === "AbortError" || err.message?.includes("Failed to fetch")) {
-        const demoReport = await loadDemoData();
+      const error = err as { name?: string; message?: string };
+      if (error.name === "AbortError" || error.message?.includes("Failed to fetch")) {
+        const demoReport = await loadDemoData(teamName);
         if (demoReport) {
           onReportGenerated(demoReport, "Demo Mode");
           setLoading(false);
@@ -253,10 +310,77 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                 >
                   {searchQuery.trim() === "" ? (
                     <div className="p-3 text-sm text-muted-foreground">Start typing to search teams...</div>
+                  ) : searchError === "MISSING_API_KEY" ? (
+                    <div className="p-3 space-y-2">
+                      <div className="text-sm text-muted-foreground">
+                        Live search disabled (missing GRID_API_KEY). You can still generate a demo report.
+                      </div>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useDemoTeams}
+                          onChange={(e) => setUseDemoTeams(e.target.checked)}
+                          className="cursor-pointer"
+                        />
+                        <span>Use Demo Teams</span>
+                      </label>
+                      {useDemoTeams && (
+                        <div className="pt-2 border-t border-border">
+                          <div className="text-xs text-muted-foreground mb-2">DEMO SEARCH</div>
+                          <div
+                            className="p-2 text-sm cursor-pointer hover:bg-accent rounded"
+                            onClick={() => handleDemoTeamSelect("Cloud9")}
+                          >
+                            Cloud9
+                          </div>
+                          <div
+                            className="p-2 text-sm cursor-pointer hover:bg-accent rounded"
+                            onClick={() => handleDemoTeamSelect("Sentinels")}
+                          >
+                            Sentinels
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : searchError === "GRID_FETCH_FAILED" ? (
+                    <div className="p-3 space-y-2">
+                      <div className="text-sm text-destructive">Live search error. Try again.</div>
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={useDemoTeams}
+                          onChange={(e) => setUseDemoTeams(e.target.checked)}
+                          className="cursor-pointer"
+                        />
+                        <span>Use Demo Teams</span>
+                      </label>
+                      {useDemoTeams && (
+                        <div className="pt-2 border-t border-border">
+                          <div className="text-xs text-muted-foreground mb-2">DEMO SEARCH</div>
+                          <div
+                            className="p-2 text-sm cursor-pointer hover:bg-accent rounded"
+                            onClick={() => handleDemoTeamSelect("Cloud9")}
+                          >
+                            Cloud9
+                          </div>
+                          <div
+                            className="p-2 text-sm cursor-pointer hover:bg-accent rounded"
+                            onClick={() => handleDemoTeamSelect("Sentinels")}
+                          >
+                            Sentinels
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   ) : teams.length === 0 ? (
                     <div className="p-3 text-sm text-muted-foreground">No teams found.</div>
                   ) : (
                     <div>
+                      {searchMode === "LIVE" && (
+                        <div className="px-3 py-1 text-xs text-muted-foreground border-b border-border bg-muted/30">
+                          LIVE SEARCH
+                        </div>
+                      )}
                       {teams.map((team, index) => (
                         <div
                           key={team.id || team.name}
@@ -276,7 +400,7 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
             </div>
             <button
               type="submit"
-              disabled={loading || !teamName.trim() || !teamId}
+              disabled={loading || !teamName.trim() || (!teamId && !useDemoTeams)}
               className="h-12 px-6 bg-primary text-primary-foreground font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? (
