@@ -1,0 +1,85 @@
+{
+  "teams": {
+    "Cloud9": {
+      "teamName": "Cloud9",
+      "region": "NA",
+      "lastUpdated": "2026-01-01",
+      "sampleSize": 15,
+      "dateRange": "Last 30 days",
+      "tendencies": [
+        {
+          "title": "Heavy on first-pick Ahri",
+          "evidence": "67% of games in last 30 days",
+          "confidence": "high"
+        },
+        {
+          "title": "Frequent 3-man dives bot",
+          "evidence": "Occurred in 8/15 early games",
+          "confidence": "medium"
+        }
+      ],
+      "players": [
+        {
+          "name": "Fudge",
+          "role": "Top",
+          "champions": [
+            { "name": "Jayce", "winRate": 0.62, "frequency": 0.42 },
+            { "name": "Ornn", "winRate": 0.55, "frequency": 0.38 }
+          ]
+        },
+        {
+          "name": "Blaber",
+          "role": "Jungle",
+          "champions": [
+            { "name": "Lee Sin", "winRate": 0.58, "frequency": 0.50 },
+            { "name": "Wukong", "winRate": 0.54, "frequency": 0.35 }
+          ]
+        }
+      ],
+      "compositions": [
+        { "comp": "Bruiser-ADC", "frequency": 0.68, "description": "Heavy scaling with frontline protection" },
+        { "comp": "Poke-Control", "frequency": 0.45, "description": "Siege-oriented with long-range threat" }
+      ],
+      "evidence": [
+        { "metric": "Ahri first-picks", "value": "10/15 games", "sampleSize": "15 matches" },
+        { "metric": "Early Bot Dives", "value": "8/15 games", "sampleSize": "15 matches" },
+        { "metric": "Average Game Time", "value": "32:15", "sampleSize": "15 matches" }
+      ]
+    },
+    "Sentinels": {
+      "teamName": "Sentinels",
+      "region": "NA",
+      "lastUpdated": "2026-01-01",
+      "sampleSize": 12,
+      "dateRange": "Last 30 days",
+      "tendencies": [
+        {
+          "title": "Split-A executes",
+          "evidence": "60% of attack rounds on Ascent",
+          "confidence": "high"
+        },
+        {
+          "title": "Mid-control stalls",
+          "evidence": "40% of defensive rounds",
+          "confidence": "medium"
+        }
+      ],
+      "players": [
+        {
+          "name": "TenZ",
+          "role": "Duelist",
+          "champions": [
+            { "name": "Jett", "winRate": 0.65, "frequency": 0.70 },
+            { "name": "Yoru", "winRate": 0.48, "frequency": 0.20 }
+          ]
+        }
+      ],
+      "compositions": [
+        { "comp": "Omen + Sova", "frequency": 0.85, "description": "Standard info-smoke combo" }
+      ],
+      "evidence": [
+        { "metric": "A-Site Plant Rate", "value": "72%", "sampleSize": "12 matches" }
+      ]
+    }
+  }
+}
