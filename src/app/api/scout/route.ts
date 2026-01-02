@@ -55,11 +55,11 @@ export async function POST(req: NextRequest) {
 
       clearTimeout(timeoutId);
 
+      // Return honest error: scouting is not implemented yet
       return NextResponse.json({
-        success: true,
-        source: "GRID",
-        data: null // Frontend will use demo data as a filler but without the error message
-      });
+        success: false,
+        code: "SCOUT_NOT_IMPLEMENTED",
+      }, { status: 503 });
 
     } catch (err: any) {
       clearTimeout(timeoutId);
