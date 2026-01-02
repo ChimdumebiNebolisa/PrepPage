@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeJson } from "@/lib/http";
 
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 
@@ -43,19 +44,19 @@ export async function GET() {
 
     clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => "Unknown error");
+    let data;
+    try {
+      data = await safeJson(response, "health_check");
+    } catch (err: any) {
       return NextResponse.json(
         {
           success: false,
           code: "GRID_FETCH_FAILED",
-          error: `HTTP ${response.status}: ${errorText.substring(0, 200)}`,
+          error: err.message?.substring(0, 200) || "Unknown error",
         },
         { status: 502 }
       );
     }
-
-    const data = await response.json();
 
     // Check for GraphQL errors
     if (data.errors) {
