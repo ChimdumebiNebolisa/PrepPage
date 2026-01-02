@@ -199,9 +199,9 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                   onInteractOutside={(e) => {
                     // Don't close if clicking inside the popover content or on the input trigger
                     const target = e.target as HTMLElement;
-                    const popoverContent = e.currentTarget;
+                    const popoverContent = e.currentTarget as HTMLElement;
                     if (
-                      popoverContent.contains(target) ||
+                      popoverContent?.contains(target) ||
                       target === inputRef.current ||
                       target.closest('input')
                     ) {
