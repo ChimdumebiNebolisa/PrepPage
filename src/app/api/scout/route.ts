@@ -11,14 +11,14 @@ export async function POST(req: NextRequest) {
 
     if (!teamName) {
       return NextResponse.json(
-        { ok: false, success: false, error: "team_not_found" },
+        { success: false, error: "team_not_found" },
         { status: 400 }
       );
     }
 
     if (!GRID_API_KEY || GRID_API_KEY === "YOUR_GRID_API_KEY") {
       return NextResponse.json(
-        { ok: false, success: false, code: "MISSING_API_KEY" },
+        { success: false, code: "MISSING_API_KEY" },
         { status: 503 }
       );
     }
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       if (!response.ok) throw new Error("GRID_FETCH_FAILED");
       const data = await response.json();
       */
-      
+
       // For MVP, we simulate a small delay.
       await new Promise((resolve, reject) => {
         const timer = setTimeout(resolve, 1500);
@@ -52,11 +52,10 @@ export async function POST(req: NextRequest) {
           reject(new Error('AbortError'));
         });
       });
-      
+
       clearTimeout(timeoutId);
-      
+
       return NextResponse.json({
-        ok: true,
         success: true,
         source: "GRID",
         data: null // Frontend will use demo data as a filler but without the error message
@@ -65,13 +64,13 @@ export async function POST(req: NextRequest) {
     } catch (err: any) {
       clearTimeout(timeoutId);
       if (err.name === 'AbortError' || err.message === 'AbortError') {
-        return NextResponse.json({ ok: false, success: false, code: "GRID_FETCH_FAILED" }, { status: 504 });
+        return NextResponse.json({ success: false, code: "GRID_FETCH_FAILED" }, { status: 504 });
       }
-      return NextResponse.json({ ok: false, success: false, code: "GRID_FETCH_FAILED" }, { status: 502 });
+      return NextResponse.json({ success: false, code: "GRID_FETCH_FAILED" }, { status: 502 });
     }
   } catch (error) {
     return NextResponse.json(
-      { ok: false, success: false, error: "internal_server_error" },
+      { success: false, error: "internal_server_error" },
       { status: 500 }
     );
   }

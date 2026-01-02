@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { animate } from "animejs";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -27,12 +28,12 @@ export default function Report({ report, source }: { report: TeamReport; source:
   const generateMarkdown = () => {
     let md = `# Scouting Report: ${report.teamName}\n`;
     md += `**Region:** ${report.region} | **Sample:** ${report.sampleSize} matches | **Range:** ${report.dateRange} | **Source:** ${source}\n\n`;
-    
+
     md += `## Team Tendencies\n`;
     report.tendencies.forEach(t => {
       md += `- **${t.title}**: ${t.evidence} (Confidence: ${t.confidence})\n`;
     });
-    
+
     md += `\n## Player Tendencies\n`;
     md += `| Player | Role | Top Champs | Win Rate | Freq |\n`;
     md += `|--------|------|------------|----------|------|\n`;
@@ -51,9 +52,13 @@ export default function Report({ report, source }: { report: TeamReport; source:
     return md;
   };
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(generateMarkdown());
-    alert("Copied to clipboard!"); // Replace with Toast if sonner is available
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(generateMarkdown());
+      toast.success("Copied to clipboard");
+    } catch (error) {
+      toast.error("Failed to copy to clipboard");
+    }
   };
 
   const handleDownload = () => {
@@ -153,16 +158,16 @@ export default function Report({ report, source }: { report: TeamReport; source:
 
           {/* Evidence Table */}
           <section>
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowEvidence(!showEvidence)}
               className="w-full justify-between"
             >
               <span>{showEvidence ? "Hide Evidence" : "View Evidence"}</span>
               {showEvidence ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
-            
+
             {showEvidence && (
               <div className="mt-4 rounded-md border">
                 <Table>

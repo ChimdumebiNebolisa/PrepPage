@@ -37,10 +37,10 @@ GRID_API_KEY=your_key_here
 ```
 
 ### Important: Security
-We use `GRID_API_KEY` (server-side) instead of `NEXT_PUBLIC_GRID_API_KEY`. 
+We use `GRID_API_KEY` (server-side) instead of `NEXT_PUBLIC_GRID_API_KEY`.
 - **Local Development**: Set `GRID_API_KEY` in `.env.local`.
-- **Production (Vercel)**: Set `GRID_API_KEY` in the Environment Variables section of your project settings for both Preview and Production environments.
-- **Why?**: Variables prefixed with `NEXT_PUBLIC_` are exposed to the browser bundle, making your API key public. Using a server-side only variable ensures your secrets remain secure.
+- **Production (Vercel)**: Set `GRID_API_KEY` in the Environment Variables section of your project settings for both Preview and Production environments. **Note:** Environment variable changes on Vercel only apply to NEW deployments. After updating variables, you must redeploy for changes to take effect.
+- **Why?**: Variables prefixed with `NEXT_PUBLIC_*` are bundled client-side and exposed to the browser, making your API key public. Never use `NEXT_PUBLIC_*` for secrets. Using a server-side only variable ensures your secrets remain secure.
 
 Demo mode works out-of-the-box if the key is missing or GRID fails.
 

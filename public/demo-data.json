@@ -16,6 +16,16 @@
           "title": "Frequent 3-man dives bot",
           "evidence": "Occurred in 8/15 early games",
           "confidence": "medium"
+        },
+        {
+          "title": "Early Rift Herald priority",
+          "evidence": "Secured in 12/15 games before 14 minutes",
+          "confidence": "high"
+        },
+        {
+          "title": "Late-game scaling focus",
+          "evidence": "Average game time 32:15, 73% win rate post-30min",
+          "confidence": "medium"
         }
       ],
       "players": [
@@ -43,7 +53,9 @@
       "evidence": [
         { "metric": "Ahri first-picks", "value": "10/15 games", "sampleSize": "15 matches" },
         { "metric": "Early Bot Dives", "value": "8/15 games", "sampleSize": "15 matches" },
-        { "metric": "Average Game Time", "value": "32:15", "sampleSize": "15 matches" }
+        { "metric": "Average Game Time", "value": "32:15", "sampleSize": "15 matches" },
+        { "metric": "Rift Herald Control", "value": "12/15 games", "sampleSize": "15 matches" },
+        { "metric": "Late Game Win Rate", "value": "73%", "sampleSize": "11 post-30min games" }
       ]
     },
     "Sentinels": {
@@ -62,6 +74,16 @@
           "title": "Mid-control stalls",
           "evidence": "40% of defensive rounds",
           "confidence": "medium"
+        },
+        {
+          "title": "Aggressive early rotations",
+          "evidence": "75% of rounds involve early map control",
+          "confidence": "high"
+        },
+        {
+          "title": "Operator usage on defense",
+          "evidence": "Jett Operator in 8/12 defensive rounds",
+          "confidence": "medium"
         }
       ],
       "players": [
@@ -72,13 +94,23 @@
             { "name": "Jett", "winRate": 0.65, "frequency": 0.70 },
             { "name": "Yoru", "winRate": 0.48, "frequency": 0.20 }
           ]
+        },
+        {
+          "name": "Zekken",
+          "role": "Initiator",
+          "champions": [
+            { "name": "Sova", "winRate": 0.58, "frequency": 0.55 },
+            { "name": "Breach", "winRate": 0.52, "frequency": 0.35 }
+          ]
         }
       ],
       "compositions": [
         { "comp": "Omen + Sova", "frequency": 0.85, "description": "Standard info-smoke combo" }
       ],
       "evidence": [
-        { "metric": "A-Site Plant Rate", "value": "72%", "sampleSize": "12 matches" }
+        { "metric": "A-Site Plant Rate", "value": "72%", "sampleSize": "12 matches" },
+        { "metric": "Early Round Control", "value": "75%", "sampleSize": "12 matches" },
+        { "metric": "Operator Defense Usage", "value": "67%", "sampleSize": "12 matches" }
       ]
     }
   }
