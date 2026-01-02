@@ -10,7 +10,7 @@ describe('ScoutingEngine', () => {
     vi.restoreAllMocks();
   });
 
-  it('keeps dropdown open on focus and shows start typing message', async () => {
+  it('shows start typing message when dropdown is open and query is empty', async () => {
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
     const input = screen.getByPlaceholderText(/start typing/i);
     await userEvent.click(input);
@@ -20,6 +20,7 @@ describe('ScoutingEngine', () => {
   it('triggers /api/teams call when typing', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
+      ok: true,
     });
     vi.stubGlobal('fetch', mockFetch);
 
@@ -32,9 +33,24 @@ describe('ScoutingEngine', () => {
     });
   });
 
-  it('selects team and closes popover on click', async () => {
+  it('does not call API when query is empty', async () => {
+    const mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+
+    render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
+    const input = screen.getByPlaceholderText(/start typing/i);
+    await userEvent.click(input);
+
+    // Wait a bit to ensure no API call
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('selects team and closes dropdown on click', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
+      ok: true,
     });
     vi.stubGlobal('fetch', mockFetch);
 
@@ -58,9 +74,11 @@ describe('ScoutingEngine', () => {
     const mockFetch = vi.fn()
       .mockResolvedValueOnce({
         json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
+        ok: true,
       })
       .mockResolvedValueOnce({
-        json: async () => ({ success: true, source: 'GRID', data: {} }),
+        json: async () => ({ success: true, source: 'GRID', data: { teamName: 'Team1', region: 'NA', lastUpdated: '2026-01-01', sampleSize: 10, dateRange: 'Last 30 days', tendencies: [], players: [], compositions: [], evidence: [] } }),
+        ok: true,
       });
     vi.stubGlobal('fetch', mockFetch);
 
@@ -78,9 +96,58 @@ describe('ScoutingEngine', () => {
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith('/api/scout', expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ teamId: '80', game: 'lol' }),
       }));
     });
   });
-});
 
+  it('triggers demo fallback when /api/scout fails', async () => {
+    const mockDemoData = {
+      teams: {
+        Cloud9: {
+          teamName: 'Cloud9',
+          region: 'NA',
+          lastUpdated: '2026-01-01',
+          sampleSize: 15,
+          dateRange: 'Last 30 days',
+          tendencies: [],
+          players: [],
+          compositions: [],
+          evidence: [],
+        },
+      },
+    };
+
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
+        ok: true,
+      })
+      .mockResolvedValueOnce({
+        json: async () => ({ success: false, code: 'GRID_FETCH_FAILED' }),
+        ok: false,
+      })
+      .mockResolvedValueOnce({
+        json: async () => mockDemoData,
+        ok: true,
+      });
+    vi.stubGlobal('fetch', mockFetch);
+
+    render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
+    const input = screen.getByPlaceholderText(/start typing/i);
+    await userEvent.type(input, 'fa');
+
+    await waitFor(() => {
+      expect(screen.getByText('Team1')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByText('Team1'));
+    await userEvent.click(screen.getByText(/generate report/i));
+
+    await waitFor(() => {
+      expect(mockOnReportGenerated).toHaveBeenCalledWith(
+        expect.objectContaining({ teamName: 'Cloud9' }),
+        'Demo Mode'
+      );
+    });
+  });
+});

@@ -1,14 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Input } from "@/components/ui/input";
-import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { ScoutResponse, TeamReport } from "@/lib/types";
-import { AlertCircle, Loader2, Search, Check } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 interface Team {
   id?: string;
@@ -22,6 +15,12 @@ interface TeamsResponse {
   teams: Team[];
 }
 
+interface DemoData {
+  teams: {
+    [key: string]: TeamReport;
+  };
+}
+
 export default function ScoutingEngine({ onReportGenerated }: { onReportGenerated: (report: TeamReport, source: string) => void }) {
   const [teamName, setTeamName] = useState("");
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -32,10 +31,15 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
   const [searchQuery, setSearchQuery] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Debounced search
+  // Debounced search - only call API if query is not empty
   useEffect(() => {
+    if (!searchQuery.trim()) {
+      setTeams([]);
+      return;
+    }
+
     const fetchTeams = async (q: string) => {
       try {
         const response = await fetch(`/api/teams?q=${encodeURIComponent(q)}&limit=10`);
@@ -58,7 +62,24 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
     return () => clearTimeout(timeoutId);
   }, [searchQuery]);
 
-  // Open popover on focus (no API call - just show "Start typing..." message)
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node) &&
+        inputRef.current &&
+        !inputRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Open dropdown on focus
   const handleInputFocus = useCallback(() => {
     setOpen(true);
   }, []);
@@ -95,13 +116,33 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
   const handleTeamSelect = (team: Team) => {
     setTeamName(team.name);
     setTeamId(team.id || null);
-    setSearchQuery(team.name); // Show selected team in input
+    setSearchQuery(team.name);
     setOpen(false);
     setHighlightedIndex(-1);
-    // Focus back to input after selection
     setTimeout(() => {
       inputRef.current?.focus();
     }, 0);
+  };
+
+  // Demo fallback function
+  const loadDemoData = async (): Promise<TeamReport | null> => {
+    try {
+      const response = await fetch("/demo-data.json");
+      if (!response.ok) {
+        return null;
+      }
+      const demoData: DemoData = await response.json();
+      // Use first team or try to match by name
+      const teamKeys = Object.keys(demoData.teams);
+      if (teamKeys.length > 0) {
+        const firstTeam = demoData.teams[teamKeys[0]];
+        return firstTeam;
+      }
+      return null;
+    } catch (err) {
+      console.error("Failed to load demo data:", err);
+      return null;
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,63 +155,83 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
     setLoading(true);
     setError(null);
 
+    // Create timeout controller for 5 second timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
     try {
       const response = await fetch("/api/scout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ teamId, game: "lol" }),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
+
+      // Check if response is not ok (non-2xx)
+      if (!response.ok) {
+        // Try demo fallback
+        const demoReport = await loadDemoData();
+        if (demoReport) {
+          onReportGenerated(demoReport, "Demo Mode");
+          setLoading(false);
+          return;
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
 
       const result: ScoutResponse = await response.json();
 
       if (result.success && result.data) {
         onReportGenerated(result.data, result.source || "GRID");
-      } else {
-        // Show explicit error based on code
-        if (result.code === "MISSING_API_KEY") {
-          setError("Live scouting failed: GRID API key not configured.");
-        } else if (result.code === "GRID_FETCH_FAILED") {
-          setError("Live scouting failed: GRID connection failed.");
-        } else if (result.code === "TEAM_NOT_FOUND") {
-          setError("Team not found in GRID database.");
-        } else if (result.code === "NO_SERIES_FOUND") {
-          setError("No recent series found for this team.");
-        } else if (result.code === "PARSE_FAILED") {
-          setError("Failed to parse match data. Please try again.");
-        } else if (result.code === "SCOUT_NOT_IMPLEMENTED") {
-          setError("Live scouting is not yet implemented.");
-        } else {
-          setError(result.error || "Live scouting failed. Please try again.");
+        setLoading(false);
+        return;
+      }
+
+      // API returned success:false - trigger demo fallback
+      const demoReport = await loadDemoData();
+      if (demoReport) {
+        onReportGenerated(demoReport, "Demo Mode");
+        setLoading(false);
+        return;
+      }
+
+      setError("Failed to generate report. Demo data unavailable.");
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+
+      // Check if it's an abort (timeout) or network error - try demo fallback
+      if (err.name === "AbortError" || err.message?.includes("Failed to fetch")) {
+        const demoReport = await loadDemoData();
+        if (demoReport) {
+          onReportGenerated(demoReport, "Demo Mode");
+          setLoading(false);
+          return;
         }
       }
-    } catch (err) {
-      setError("Network error. Please check your connection and try again.");
+
+      setError("Failed to generate report. Demo data unavailable.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto mb-12">
-      <CardHeader>
-        <CardTitle className="text-2xl">Scouting Engine</CardTitle>
-      </CardHeader>
-      <CardContent>
+    <div className="w-full max-w-2xl mx-auto mb-12">
+      <div className="bg-card border border-border rounded-lg p-6">
+        <h2 className="text-2xl font-semibold mb-4">Scouting Engine</h2>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex gap-2">
-            <Popover open={open} onOpenChange={setOpen}>
-              <div className="relative flex-1">
-                <PopoverTrigger asChild>
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input
+            <div className="relative flex-1">
+              <div className="relative">
+                <input
                   ref={inputRef}
                   type="text"
                   value={searchQuery}
                   onChange={(e) => {
                     const value = e.target.value;
                     setSearchQuery(value);
-                    // Clear team selection when user types something different
                     if (value !== teamName) {
                       setTeamName("");
                       setTeamId(null);
@@ -179,98 +240,71 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                     setHighlightedIndex(-1);
                   }}
                   onFocus={handleInputFocus}
-                  onBlur={(e) => {
-                    // Don't close popover on blur - let onInteractOutside handle it
-                    // This prevents flash-close when clicking items
-                  }}
                   onKeyDown={handleKeyDown}
                   placeholder="Start typing to search teams..."
-                  className="pl-10 h-12"
+                  className="w-full h-12 pl-4 pr-4 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:opacity-50"
                   disabled={loading}
                 />
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent
-                  className="p-0 w-[var(--radix-popover-trigger-width)]"
-                  align="start"
-                  sideOffset={4}
-                  onOpenAutoFocus={(e) => e.preventDefault()}
-                  onCloseAutoFocus={(e) => e.preventDefault()}
-                  onInteractOutside={(e) => {
-                    // Don't close if clicking inside the popover content or on the input trigger
-                    const target = e.target as HTMLElement;
-                    const popoverContent = e.currentTarget as HTMLElement;
-                    if (
-                      popoverContent?.contains(target) ||
-                      target === inputRef.current ||
-                      target.closest('input')
-                    ) {
-                      e.preventDefault();
-                    }
-                  }}
-                >
-                  <Command>
-                    <CommandList ref={listRef}>
-                      <CommandEmpty>
-                        {searchQuery ? "No teams found." : "Start typing to search teams..."}
-                      </CommandEmpty>
-                      <CommandGroup>
-                        {teams.map((team, index) => (
-                          <CommandItem
-                            key={team.id || team.name}
-                            value={team.name}
-                            onSelect={() => handleTeamSelect(team)}
-                            onMouseDown={(e) => {
-                              // Prevent input blur from closing popover before click completes
-                              e.preventDefault();
-                            }}
-                            onClick={(e) => {
-                              // Ensure click triggers selection
-                              e.preventDefault();
-                              handleTeamSelect(team);
-                            }}
-                            className={cn(
-                              "cursor-pointer",
-                              highlightedIndex === index && "bg-accent"
-                            )}
-                          >
-                            <Check
-                              className={cn(
-                                "mr-2 h-4 w-4",
-                                teamName === team.name ? "opacity-100" : "opacity-0"
-                              )}
-                            />
-                            {team.name}
-                          </CommandItem>
-                        ))}
-                      </CommandGroup>
-                    </CommandList>
-                  </Command>
-                </PopoverContent>
               </div>
-            </Popover>
-            <Button type="submit" size="lg" disabled={loading || !teamName.trim() || !teamId} className="h-12 px-6">
-              {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-              Generate Report
-            </Button>
+              {open && (
+                <div
+                  ref={dropdownRef}
+                  className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-md shadow-lg max-h-60 overflow-auto"
+                >
+                  {searchQuery.trim() === "" ? (
+                    <div className="p-3 text-sm text-muted-foreground">Start typing to search teams...</div>
+                  ) : teams.length === 0 ? (
+                    <div className="p-3 text-sm text-muted-foreground">No teams found.</div>
+                  ) : (
+                    <div>
+                      {teams.map((team, index) => (
+                        <div
+                          key={team.id || team.name}
+                          onClick={() => handleTeamSelect(team)}
+                          onMouseDown={(e) => e.preventDefault()}
+                          className={`p-3 cursor-pointer hover:bg-accent ${
+                            highlightedIndex === index ? "bg-accent" : ""
+                          } ${teamName === team.name ? "font-medium" : ""}`}
+                        >
+                          {team.name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={loading || !teamName.trim() || !teamId}
+              className="h-12 px-6 bg-primary text-primary-foreground font-medium rounded-md hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {loading ? (
+                <span className="flex items-center gap-2">
+                  <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  Generating...
+                </span>
+              ) : (
+                "Generate Report"
+              )}
+            </button>
           </div>
 
-
           {loading && (
-            <div className="flex items-center justify-center py-4 gap-2 text-muted-foreground animate-pulse">
-              <Loader2 className="h-5 w-5 animate-spin" />
+            <div className="flex items-center justify-center py-4 gap-2 text-muted-foreground">
+              <span className="inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
               <span>Analyzing opponent patterns...</span>
             </div>
           )}
 
           {error && (
             <div className="flex items-center gap-2 p-3 text-sm rounded-md bg-destructive/10 text-destructive border border-destructive/20">
-              <AlertCircle className="h-4 w-4" />
+              <span>⚠</span>
               <span>{error}</span>
             </div>
           )}
         </form>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

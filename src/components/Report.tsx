@@ -1,29 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { animate } from "animejs";
-import { toast } from "sonner";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
+import { useState } from "react";
 import { TeamReport } from "@/lib/types";
-import { ChevronDown, ChevronUp, Copy, Download, Star } from "lucide-react";
 
 export default function Report({ report, source }: { report: TeamReport; source: string }) {
   const [showEvidence, setShowEvidence] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (containerRef.current) {
-      animate(containerRef.current, {
-        translateY: [20, 0],
-        opacity: [0, 1],
-        easing: "easeOutQuad",
-        duration: 500,
-      });
-    }
-  }, [report]);
+  const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
   const generateMarkdown = () => {
     let md = `# Scouting Report: ${report.teamName}\n`;
@@ -55,9 +37,11 @@ export default function Report({ report, source }: { report: TeamReport; source:
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(generateMarkdown());
-      toast.success("Copied to clipboard");
+      setCopyStatus("Copied!");
+      setTimeout(() => setCopyStatus(null), 2000);
     } catch (error) {
-      toast.error("Failed to copy to clipboard");
+      setCopyStatus("Failed to copy");
+      setTimeout(() => setCopyStatus(null), 2000);
     }
   };
 
@@ -65,17 +49,23 @@ export default function Report({ report, source }: { report: TeamReport; source:
     const element = document.createElement("a");
     const file = new Blob([generateMarkdown()], { type: "text/markdown" });
     element.href = URL.createObjectURL(file);
-    element.download = `prep_page_${report.teamName.toLowerCase()}_${new Date().toISOString().split('T')[0]}.md`;
+    element.download = `prep_page_${report.teamName.toLowerCase().replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.md`;
     document.body.appendChild(element);
     element.click();
+    document.body.removeChild(element);
   };
 
+  const badgeText = source === "GRID" ? "LIVE" : "DEMO MODE";
+  const badgeClass = source === "GRID"
+    ? "bg-primary text-primary-foreground"
+    : "bg-secondary text-secondary-foreground";
+
   return (
-    <div ref={containerRef} className="w-full max-w-4xl mx-auto space-y-6 pb-20">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+    <div className="w-full max-w-4xl mx-auto space-y-6 pb-20">
+      <div className="bg-card border border-border rounded-lg p-6">
+        <div className="flex flex-row items-center justify-between mb-4">
           <div>
-            <CardTitle className="text-3xl font-bold">{report.teamName}</CardTitle>
+            <h2 className="text-3xl font-bold">{report.teamName}</h2>
             <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
               <span>Region: {report.region}</span>
               <span>•</span>
@@ -84,22 +74,21 @@ export default function Report({ report, source }: { report: TeamReport; source:
               <span>{report.dateRange}</span>
             </div>
           </div>
-          <Badge variant={source === "GRID" ? "default" : "secondary"} className="text-sm">
-            {source}
-          </Badge>
-        </CardHeader>
-        <CardContent className="space-y-8">
+          <span className={`px-3 py-1 rounded-full text-sm font-medium ${badgeClass}`}>
+            {badgeText}
+          </span>
+        </div>
+
+        <div className="space-y-8">
           {/* Team Tendencies */}
           <section>
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              Team Tendencies
-            </h3>
+            <h3 className="text-lg font-semibold mb-4">Team Tendencies</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {report.tendencies.map((tendency, i) => (
                 <div key={i} className="p-4 rounded-lg border bg-muted/30">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-bold">{tendency.title}</span>
-                    {tendency.confidence === 'high' && <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />}
+                    {tendency.confidence === 'high' && <span className="text-yellow-400">★</span>}
                   </div>
                   <p className="text-sm text-muted-foreground">{tendency.evidence}</p>
                 </div>
@@ -111,32 +100,32 @@ export default function Report({ report, source }: { report: TeamReport; source:
           <section>
             <h3 className="text-lg font-semibold mb-4">Player Tendencies</h3>
             <div className="rounded-md border overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Player</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Top Champs</TableHead>
-                    <TableHead className="text-right">Win Rate</TableHead>
-                    <TableHead className="text-right">Freq</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {report.players.map((player) => (
-                    <TableRow key={player.name}>
-                      <TableCell className="font-medium">{player.name}</TableCell>
-                      <TableCell>{player.role}</TableCell>
-                      <TableCell>{player.champions.map(c => c.name).join(", ")}</TableCell>
-                      <TableCell className="text-right">
+              <table className="w-full">
+                <thead className="bg-muted">
+                  <tr>
+                    <th className="px-4 py-2 text-left font-medium">Player</th>
+                    <th className="px-4 py-2 text-left font-medium">Role</th>
+                    <th className="px-4 py-2 text-left font-medium">Top Champs</th>
+                    <th className="px-4 py-2 text-right font-medium">Win Rate</th>
+                    <th className="px-4 py-2 text-right font-medium">Freq</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.players.map((player, idx) => (
+                    <tr key={player.name} className={idx % 2 === 0 ? "bg-background" : "bg-muted/30"}>
+                      <td className="px-4 py-2 font-medium">{player.name}</td>
+                      <td className="px-4 py-2">{player.role}</td>
+                      <td className="px-4 py-2">{player.champions.map(c => c.name).join(", ")}</td>
+                      <td className="px-4 py-2 text-right">
                         {player.champions.map(c => `${(c.winRate * 100).toFixed(0)}%`).join(", ")}
-                      </TableCell>
-                      <TableCell className="text-right">
+                      </td>
+                      <td className="px-4 py-2 text-right">
                         {player.champions.map(c => `${(c.frequency * 100).toFixed(0)}%`).join(", ")}
-                      </TableCell>
-                    </TableRow>
+                      </td>
+                    </tr>
                   ))}
-                </TableBody>
-              </Table>
+                </tbody>
+              </table>
             </div>
           </section>
 
@@ -146,11 +135,13 @@ export default function Report({ report, source }: { report: TeamReport; source:
             <div className="space-y-3">
               {report.compositions.map((comp, i) => (
                 <div key={i} className="flex flex-col gap-1">
-                   <div className="flex justify-between items-center">
-                      <span className="font-medium">{comp.comp}</span>
-                      <Badge variant="outline">{(comp.frequency * 100).toFixed(0)}% Frequency</Badge>
-                   </div>
-                   <p className="text-sm text-muted-foreground">{comp.description}</p>
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">{comp.comp}</span>
+                    <span className="px-2 py-1 text-xs border rounded">
+                      {(comp.frequency * 100).toFixed(0)}% Frequency
+                    </span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{comp.description}</p>
                 </div>
               ))}
             </div>
@@ -158,49 +149,58 @@ export default function Report({ report, source }: { report: TeamReport; source:
 
           {/* Evidence Table */}
           <section>
-            <Button
-              variant="ghost"
-              size="sm"
+            <button
               onClick={() => setShowEvidence(!showEvidence)}
-              className="w-full justify-between"
+              className="w-full flex justify-between items-center px-4 py-2 text-sm font-medium hover:bg-accent rounded-md transition-colors"
             >
               <span>{showEvidence ? "Hide Evidence" : "View Evidence"}</span>
-              {showEvidence ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </Button>
+              <span>{showEvidence ? "▲" : "▼"}</span>
+            </button>
 
             {showEvidence && (
-              <div className="mt-4 rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Metric</TableHead>
-                      <TableHead>Value</TableHead>
-                      <TableHead>Sample Size</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
+              <div className="mt-4 rounded-md border overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium">Metric</th>
+                      <th className="px-4 py-2 text-left font-medium">Value</th>
+                      <th className="px-4 py-2 text-left font-medium">Sample Size</th>
+                    </tr>
+                  </thead>
+                  <tbody>
                     {report.evidence.map((item, i) => (
-                      <TableRow key={i}>
-                        <TableCell className="font-medium">{item.metric}</TableCell>
-                        <TableCell>{item.value}</TableCell>
-                        <TableCell>{item.sampleSize}</TableCell>
-                      </TableRow>
+                      <tr key={i} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
+                        <td className="px-4 py-2 font-medium">{item.metric}</td>
+                        <td className="px-4 py-2">{item.value}</td>
+                        <td className="px-4 py-2">{item.sampleSize}</td>
+                      </tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </table>
               </div>
             )}
           </section>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      <div className="flex gap-4 justify-center">
-        <Button onClick={handleCopy} variant="outline" className="gap-2">
-          <Copy className="h-4 w-4" /> Copy as Markdown
-        </Button>
-        <Button onClick={handleDownload} variant="outline" className="gap-2">
-          <Download className="h-4 w-4" /> Download Markdown
-        </Button>
+      <div className="flex gap-4 justify-center items-center">
+        <button
+          onClick={handleCopy}
+          className="px-4 py-2 border border-border rounded-md hover:bg-accent transition-colors flex items-center gap-2"
+        >
+          <span>📋</span>
+          Copy as Markdown
+        </button>
+        <button
+          onClick={handleDownload}
+          className="px-4 py-2 border border-border rounded-md hover:bg-accent transition-colors flex items-center gap-2"
+        >
+          <span>⬇</span>
+          Download Markdown
+        </button>
+        {copyStatus && (
+          <span className="text-sm text-muted-foreground">{copyStatus}</span>
+        )}
       </div>
     </div>
   );
