@@ -44,6 +44,35 @@ We use `GRID_API_KEY` (server-side) instead of `NEXT_PUBLIC_GRID_API_KEY`.
 
 Demo mode works out-of-the-box if the key is missing or GRID fails.
 
+## Verify GRID Key
+
+To verify that your `GRID_API_KEY` is configured correctly:
+
+1. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+
+2. **Test the health endpoint:**
+   ```bash
+   npm run grid:health
+   ```
+
+   Or use curl:
+   ```bash
+   curl http://localhost:3000/api/grid/health
+   ```
+
+3. **Expected responses:**
+   - **Success (200)**: `{ "success": true, "teams": [...], "source": "GRID" }`
+     - Your API key is valid and the endpoint is working. The response includes up to 5 teams matching "Cloud9".
+   - **Missing Key (503)**: `{ "success": false, "code": "MISSING_API_KEY" }`
+     - The `GRID_API_KEY` environment variable is not set. Add it to `.env.local` for local development, or set it in Vercel environment variables for production.
+   - **Fetch Failed (502)**: `{ "success": false, "code": "GRID_FETCH_FAILED", "error": "..." }`
+     - The API key may be invalid, the GRID service is unavailable, or there's a network issue. Check the error message for details.
+
+**Note:** On Vercel, environment variable changes only apply to NEW deployments. After updating `GRID_API_KEY` in Vercel settings, you must redeploy for the changes to take effect.
+
 ## Architecture
 - **Frontend**: Next.js App Router with TypeScript.
 - **Backend**: Serverless API routes for secure GRID data fetching.

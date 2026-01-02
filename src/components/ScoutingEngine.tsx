@@ -1,18 +1,68 @@
 "use client";
 
-import { useState } from "react";
-import { Input } from "@/components/ui/input";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { ScoutResponse, TeamReport } from "@/lib/types";
-import { AlertCircle, Loader2, Search } from "lucide-react";
+import { AlertCircle, Loader2, Search, Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface Team {
+  id?: string;
+  name: string;
+}
+
+interface TeamsResponse {
+  success: boolean;
+  source: "GRID" | "Demo";
+  teams: Team[];
+}
 
 export default function ScoutingEngine({ onReportGenerated }: { onReportGenerated: (report: TeamReport, source: string) => void }) {
   const [teamName, setTeamName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [teamsSource, setTeamsSource] = useState<"GRID" | "Demo">("Demo");
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const SUGGESTED_TEAMS = ["Cloud9", "Sentinels"];
+  // Debounced search
+  useEffect(() => {
+    const fetchTeams = async (q: string) => {
+      try {
+        const response = await fetch(`/api/teams?q=${encodeURIComponent(q)}&limit=10`);
+        const data: TeamsResponse = await response.json();
+        setTeams(data.teams);
+        setTeamsSource(data.source);
+      } catch (err) {
+        console.error("Failed to fetch teams:", err);
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      fetchTeams(searchQuery);
+    }, 250);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  // Fetch initial teams when combobox opens
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    setOpen(isOpen);
+    if (isOpen && teams.length === 0) {
+      // Fetch default teams when opening
+      fetch(`/api/teams?q=&limit=10`)
+        .then((res) => res.json())
+        .then((data: TeamsResponse) => {
+          setTeams(data.teams);
+          setTeamsSource(data.source);
+        })
+        .catch((err) => console.error("Failed to fetch teams:", err));
+    }
+  }, [teams.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,33 +132,73 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex gap-2">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Opponent Team Name (e.g., Cloud9, Sentinels)"
-                value={teamName}
-                onChange={(e) => setTeamName(e.target.value)}
-                className="pl-10 h-12"
-                disabled={loading}
-              />
+              <Popover open={open} onOpenChange={handleOpenChange}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className="w-full justify-between h-12 pl-10"
+                    type="button"
+                    disabled={loading}
+                  >
+                    <div className="flex items-center flex-1 min-w-0">
+                      <Search className="absolute left-3 h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className={cn("ml-6 truncate", !teamName && "text-muted-foreground")}>
+                        {teamName || "Opponent Team Name (e.g., Cloud9, Sentinels)"}
+                      </span>
+                    </div>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent
+                  className="p-0"
+                  align="start"
+                  sideOffset={4}
+                >
+                <Command>
+                  <CommandInput
+                    placeholder="Search teams..."
+                    value={searchQuery}
+                    onValueChange={setSearchQuery}
+                  />
+                  <CommandList>
+                    <CommandEmpty>No teams found.</CommandEmpty>
+                    <CommandGroup>
+                      {teams.map((team) => (
+                        <CommandItem
+                          key={team.id || team.name}
+                          value={team.name}
+                          onSelect={() => {
+                            setTeamName(team.name);
+                            setOpen(false);
+                            setSearchQuery("");
+                          }}
+                        >
+                          <Check
+                            className={cn(
+                              "mr-2 h-4 w-4",
+                              teamName === team.name ? "opacity-100" : "opacity-0"
+                            )}
+                          />
+                          {team.name}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+                {teamsSource === "Demo" && (
+                  <div className="px-2 py-1.5 text-xs text-muted-foreground border-t">
+                    Demo list
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
             </div>
             <Button type="submit" size="lg" disabled={loading || !teamName.trim()} className="h-12 px-6">
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Generate Report
             </Button>
-          </div>
-
-          <div className="flex gap-2 text-sm items-center">
-            <span className="text-muted-foreground">Suggested teams:</span>
-            {SUGGESTED_TEAMS.map(team => (
-              <button
-                key={team}
-                type="button"
-                onClick={() => setTeamName(team)}
-                className="px-2 py-1 rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
-              >
-                {team}
-              </button>
-            ))}
           </div>
 
           {loading && (
