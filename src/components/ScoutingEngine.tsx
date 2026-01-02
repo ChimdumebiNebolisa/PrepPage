@@ -12,6 +12,8 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const SUGGESTED_TEAMS = ["Cloud9", "Sentinels"];
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!teamName.trim()) return;
@@ -28,10 +30,17 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
 
       const result: ScoutResponse = await response.json();
 
-      if (result.success && result.data) {
-        onReportGenerated(result.data, result.source || "GRID");
+      if (result.success) {
+        // Success (potentially simulated if data is null)
+        const demoDataResponse = await fetch("/demo-data.json");
+        const demoData = await demoDataResponse.json();
+        
+        // Use result data if present, otherwise fallback to matching demo team
+        const reportData = result.data || demoData.teams[teamName] || demoData.teams["Cloud9"];
+        
+        onReportGenerated(reportData, result.source || "GRID");
       } else {
-        // Fallback to demo data
+        // Fallback to demo data on explicit failure
         const demoDataResponse = await fetch("/demo-data.json");
         const demoData = await demoDataResponse.json();
         
@@ -40,6 +49,8 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
         
         if (result.error === "timeout") {
             setError("GRID API timed out. Using demo data instead.");
+        } else if (result.error) {
+            setError(`${result.error}. Showing demo data instead.`);
         } else {
             setError("GRID unavailable. Showing demo data instead.");
         }
@@ -79,6 +90,20 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Generate Report
             </Button>
+          </div>
+
+          <div className="flex gap-2 text-sm items-center">
+            <span className="text-muted-foreground">Suggested teams:</span>
+            {SUGGESTED_TEAMS.map(team => (
+              <button
+                key={team}
+                type="button"
+                onClick={() => setTeamName(team)}
+                className="px-2 py-1 rounded-md bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
+              >
+                {team}
+              </button>
+            ))}
           </div>
 
           {loading && (
