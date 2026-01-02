@@ -6,9 +6,8 @@ Prep Page is a zero-login, web-based scouting report generator that transforms o
 
 ## Features
 - **Landing Hero**: Clear value proposition with smooth animations.
-- **Scouting Engine**: Single-input field to fetch opponent data.
-- **Automated Reports**: Instant generation of team tendencies, player metrics, and compositions.
-- **Demo Mode**: Automatic fallback to local JSON data if GRID is unavailable.
+- **Scouting Engine**: Typeahead team search with real-time GRID data. Type to search teams - no demo data, only live GRID results.
+- **Automated Reports**: Instant generation of team tendencies, player metrics, and compositions from live match data.
 - **Export**: Copy as Markdown or download for easy sharing in team docs.
 
 ## Quick Start
@@ -42,7 +41,7 @@ We use `GRID_API_KEY` (server-side) instead of `NEXT_PUBLIC_GRID_API_KEY`.
 - **Production (Vercel)**: Set `GRID_API_KEY` in the Environment Variables section of your project settings for both Preview and Production environments. **Note:** Environment variable changes on Vercel only apply to NEW deployments. After updating variables, you must redeploy for changes to take effect.
 - **Why?**: Variables prefixed with `NEXT_PUBLIC_*` are bundled client-side and exposed to the browser, making your API key public. Never use `NEXT_PUBLIC_*` for secrets. Using a server-side only variable ensures your secrets remain secure.
 
-Demo mode works out-of-the-box if the key is missing or GRID fails.
+**All GRID API calls happen only in Route Handlers** under `app/api/**/route.ts`. The API key is never exposed to the browser.
 
 ## Verify GRID Key
 
@@ -58,9 +57,9 @@ To verify that your `GRID_API_KEY` is configured correctly:
    npm run grid:health
    ```
 
-   Or use curl:
-   ```bash
-   curl http://localhost:3000/api/grid/health
+   Or use curl (Windows PowerShell):
+   ```powershell
+   curl.exe -s "http://localhost:3000/api/grid/health"; echo ""
    ```
 
 3. **Expected responses:**
@@ -73,16 +72,70 @@ To verify that your `GRID_API_KEY` is configured correctly:
 
 **Note:** On Vercel, environment variable changes only apply to NEW deployments. After updating `GRID_API_KEY` in Vercel settings, you must redeploy for the changes to take effect.
 
+## Smoke Tests
+
+Test the GRID API integration locally:
+
+1. **Health Check** - Verify API key and connection:
+   ```bash
+   npm run grid:health
+   ```
+   Tests `/api/grid/health` endpoint.
+
+2. **Team Search** - Search for teams:
+   ```bash
+   npm run grid:teams
+   ```
+   Tests `/api/teams?q=faze` endpoint.
+
+3. **Scout Report** - Generate a scouting report:
+   ```bash
+   npm run grid:scout
+   ```
+   Finds a team via `/api/teams`, then generates a report via `/api/scout`.
+
+All commands require the dev server to be running (`npm run dev`).
+
+### Testing with PowerShell
+
+**Important:** In Windows PowerShell, `curl` may be an alias for `Invoke-WebRequest`; use `curl.exe` for actual curl commands.
+
+If you're using PowerShell on Windows, use `curl.exe` instead of `curl` (which is an alias for `Invoke-WebRequest`):
+
+**GET requests:**
+```powershell
+# Health check
+curl.exe -s "http://localhost:3000/api/grid/health"; echo ""
+
+# Team search
+curl.exe -s "http://localhost:3000/api/teams?q=faze&limit=10"; echo ""
+
+# Empty query (should return empty array)
+curl.exe -s "http://localhost:3000/api/teams?q=&limit=10"; echo ""
+```
+
+**POST /api/scout:**
+```powershell
+# PowerShell-native (no quoting issues)
+$body = @{ teamId="80"; game="valorant"; daysBack=30; maxSeries=8 } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://localhost:3000/api/scout" -ContentType "application/json" -Body $body
+```
+
+**Note:** The npm scripts (`npm run grid:*`) work on all platforms and don't require shell-specific syntax.
+
 ## Architecture
 - **Frontend**: Next.js App Router with TypeScript.
 - **Backend**: Serverless API routes for secure GRID data fetching.
-- **Data**: Static demo JSON for reliability.
+- **Data**: Real-time GRID API data only (no demo fallback).
 
 ## Testing
 1. Load the app.
-2. Enter "Cloud9" or "Sentinels" in the scouting engine.
-3. Click "Generate Report".
-4. Verify the report appears with detailed metrics and export options.
+2. Type a team name in the scouting engine (e.g., "Cloud9", "Faze").
+3. Select a team from the dropdown.
+4. Click "Generate Report".
+5. Verify the report appears with detailed metrics and export options.
+
+If scouting fails, you'll see a clear error message. No silent fallbacks.
 
 ## License
 Licensed under [MIT](LICENSE).
