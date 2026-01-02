@@ -29,8 +29,9 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       });
 
       const result: ScoutResponse = await response.json();
+      const isSuccessful = result.success || result.ok;
 
-      if (result.success) {
+      if (isSuccessful) {
         // Success (potentially simulated if data is null)
         const demoDataResponse = await fetch("/demo-data.json");
         const demoData = await demoDataResponse.json();
@@ -47,12 +48,16 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
         // Find matching team in demo data or default to Cloud9
         const matchedTeam = demoData.teams[teamName] || demoData.teams["Cloud9"];
         
-        if (result.error === "timeout") {
-            setError("GRID API timed out. Using demo data instead.");
+        if (result.code === "MISSING_API_KEY") {
+            setError("GRID API key not configured. Using Demo Mode.");
+        } else if (result.code === "GRID_FETCH_FAILED") {
+            setError("GRID connection failed. Using Demo Mode.");
+        } else if (result.error === "timeout") {
+            setError("GRID API timed out. Using Demo Mode.");
         } else if (result.error) {
-            setError(`${result.error}. Showing demo data instead.`);
+            setError(`${result.error}. Using Demo Mode.`);
         } else {
-            setError("GRID unavailable. Showing demo data instead.");
+            setError("GRID unavailable. Using Demo Mode.");
         }
         
         onReportGenerated(matchedTeam, "Demo Mode");

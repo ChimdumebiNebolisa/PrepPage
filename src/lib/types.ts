@@ -42,7 +42,9 @@ export interface TeamReport {
 
 export interface ScoutResponse {
   success: boolean;
+  ok?: boolean;
   data?: TeamReport;
-  source?: "GRID" | "Demo Mode";
+  source?: "GRID" | "Demo Mode" | string;
   error?: string;
+  code?: string;
 }

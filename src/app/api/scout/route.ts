@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { ScoutResponse } from "@/lib/types";
 
 // GRID API configuration
-const GRID_API_KEY = process.env.GRID_API_KEY || process.env.NEXT_PUBLIC_GRID_API_KEY;
+const GRID_API_KEY = process.env.GRID_API_KEY;
 const GRID_BASE_URL = "https://api.grid.gg/query"; // Conceptual base URL
 
 export async function POST(req: NextRequest) {
@@ -11,24 +11,25 @@ export async function POST(req: NextRequest) {
 
     if (!teamName) {
       return NextResponse.json(
-        { success: false, error: "team_not_found" },
+        { ok: false, success: false, error: "team_not_found" },
         { status: 400 }
       );
     }
 
+    if (!GRID_API_KEY || GRID_API_KEY === "YOUR_GRID_API_KEY") {
+      return NextResponse.json(
+        { ok: false, success: false, code: "MISSING_API_KEY" },
+        { status: 503 }
+      );
+    }
+
     // Simulate GRID API call with timeout protection
-    // In a real implementation, this would fetch from GRID using the API key
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
 
     try {
       // Mocking GRID response for the hackathon MVP
-      // If a real key was provided and valid, we'd use it here
-      if (!GRID_API_KEY || GRID_API_KEY === "YOUR_GRID_API_KEY") {
-        throw new Error("Missing API Key or using placeholder");
-      }
-
-      // Conceptual GRID fetch
+      // In a real implementation, the fetch below would be active.
       /*
       const response = await fetch(GRID_BASE_URL, {
         method: 'POST',
@@ -39,16 +40,23 @@ export async function POST(req: NextRequest) {
         body: JSON.stringify({ query: teamName, game }),
         signal: controller.signal
       });
+      if (!response.ok) throw new Error("GRID_FETCH_FAILED");
       const data = await response.json();
       */
       
       // For MVP, we simulate a small delay.
-      // In a real implementation with a GRID key, the fetch above would be active.
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 1500);
+        controller.signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(new Error('AbortError'));
+        });
+      });
       
-      // If we reach here and have a key, we'll simulate a successful connection
-      // even if we don't have the real data yet (conceptual GRID integration).
+      clearTimeout(timeoutId);
+      
       return NextResponse.json({
+        ok: true,
         success: true,
         source: "GRID",
         data: null // Frontend will use demo data as a filler but without the error message
@@ -56,14 +64,14 @@ export async function POST(req: NextRequest) {
 
     } catch (err: any) {
       clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        return NextResponse.json({ success: false, error: "timeout" }, { status: 504 });
+      if (err.name === 'AbortError' || err.message === 'AbortError') {
+        return NextResponse.json({ ok: false, success: false, code: "GRID_FETCH_FAILED" }, { status: 504 });
       }
-      return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+      return NextResponse.json({ ok: false, success: false, code: "GRID_FETCH_FAILED" }, { status: 502 });
     }
   } catch (error) {
     return NextResponse.json(
-      { success: false, error: "internal_server_error" },
+      { ok: false, success: false, error: "internal_server_error" },
       { status: 500 }
     );
   }

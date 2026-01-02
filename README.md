@@ -33,9 +33,16 @@ Open [http://localhost:3000](http://localhost:3000) to see the app.
 ## Environment Setup
 To use live GRID data, create a `.env.local` file with your API key:
 ```env
-NEXT_PUBLIC_GRID_API_KEY=your_key_here
+GRID_API_KEY=your_key_here
 ```
-Demo mode works out-of-the-box without an API key.
+
+### Important: Security
+We use `GRID_API_KEY` (server-side) instead of `NEXT_PUBLIC_GRID_API_KEY`. 
+- **Local Development**: Set `GRID_API_KEY` in `.env.local`.
+- **Production (Vercel)**: Set `GRID_API_KEY` in the Environment Variables section of your project settings for both Preview and Production environments.
+- **Why?**: Variables prefixed with `NEXT_PUBLIC_` are exposed to the browser bundle, making your API key public. Using a server-side only variable ensures your secrets remain secure.
+
+Demo mode works out-of-the-box if the key is missing or GRID fails.
 
 ## Architecture
 - **Frontend**: Next.js App Router with TypeScript.

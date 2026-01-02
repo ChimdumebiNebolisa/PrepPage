@@ -312,7 +312,7 @@ Prep Page assumes GRID exposes (via public API or data endpoint) the following *
   - Invalid team: return `{ "success": false, "error": "team_not_found" }`.
   - Frontend receives error → shows toast + falls back to demo mode.
 
-**Environment Variable:** `NEXT_PUBLIC_GRID_API_KEY` (or non-public key, depending on GRID's auth; if non-public, store in `.env.local` and never expose).
+**Environment Variable:** `GRID_API_KEY` (secret, server-side only). Store in `.env.local` and never expose via `NEXT_PUBLIC_`.
 
 ---
 
@@ -336,7 +336,7 @@ Prep Page assumes GRID exposes (via public API or data endpoint) the following *
 ### Deployment
 - **Platform:** Vercel (free tier, no credits needed for judges)
 - **Environment variables:**
-  - `NEXT_PUBLIC_GRID_API_KEY` or `GRID_API_KEY` (depending on GRID's auth model)
+  - `GRID_API_KEY` (server-side only)
   - Judges provided with these via `.env.example` in repo or via Vercel project setup link (password-protected is OK if provided in submission notes; not ideal for judges but acceptable if necessary)
 - **Build:** `next build` → `next start`
 - **Local dev:** `npm install && npm run dev` → `http://localhost:3000`
@@ -452,7 +452,7 @@ prep-page/
 #### 📁 Code & Assets
 - [ ] **All source code:** Next.js app with TypeScript, no secrets in committed code.
 - [ ] **Demo data:** `public/demo-data.json` (realistic, shows report structure).
-- [ ] **Environment template:** `.env.example` with `GRID_API_KEY` or `NEXT_PUBLIC_GRID_API_KEY` placeholder.
+- [ ] **Environment template:** `.env.example` with `GRID_API_KEY` placeholder.
 - [ ] **Public assets:** favicon, logo (if any), minimal branding.
 
 #### 📋 Documentation
@@ -461,7 +461,7 @@ prep-page/
   - **Quick start:** `npm install && npm run dev` → `http://localhost:3000`.
   - **Features:** List (landing page, single-team scout, demo fallback, export).
   - **Architecture:** Frontend (Next.js + Tailwind + shadcn + anime.js), backend (API route), demo mode.
-  - **Environment setup:** How to get GRID API key and set `NEXT_PUBLIC_GRID_API_KEY` in `.env.local`.
+  - **Environment setup:** How to get GRID API key and set `GRID_API_KEY` in `.env.local`.
   - **Testing:** "Load app, enter 'Cloud9', click Generate, report should appear in <5 seconds. If GRID times out, demo mode will show."
   - **Tools used:** JetBrains WebStorm/IntelliJ IDEA, Junie assistant, Next.js, Tailwind, shadcn/ui, anime.js, GRID API.
   - **Judges/Contributors:** Clear steps to run locally; no signup required.
