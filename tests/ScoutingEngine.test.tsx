@@ -17,7 +17,7 @@ describe('ScoutingEngine', () => {
   });
 
   it('shows start typing message when dropdown is open and query is empty', async () => {
-    // Mock fetch to handle titles call
+    // Mock fetch to handle titles call immediately
     const mockFetch = vi.fn().mockImplementation((url: string) => {
       if (url.includes('/api/grid/titles')) {
         return Promise.resolve({
@@ -33,9 +33,21 @@ describe('ScoutingEngine', () => {
     vi.stubGlobal('fetch', mockFetch);
 
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
+    
+    // Wait for titles fetch to complete - titles call happens immediately on mount
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/api/grid/titles'));
+    }, { timeout: 2000 });
+
+    // Wait a bit for state updates to settle
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     const input = screen.getByPlaceholderText(/start typing/i);
     await userEvent.click(input);
-    expect(screen.getByText(/start typing to search teams/i)).toBeInTheDocument();
+    
+    await waitFor(() => {
+      expect(screen.getByText(/start typing to search teams/i)).toBeInTheDocument();
+    }, { timeout: 1000 });
   });
 
   it('triggers /api/teams call when typing', async () => {
