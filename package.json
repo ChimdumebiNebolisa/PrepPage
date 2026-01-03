@@ -11,6 +11,8 @@
     "test:ci": "vitest run",
     "verify:grid": "tsx scripts/verify-grid-routes.ts",
     "verify:grid:ps": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"npm run verify:grid\"",
+    "pick:grid:team": "tsx scripts/pick-team-from-series.ts",
+    "prove:file-download": "tsx scripts/prove-file-download.ts",
     "grid:health": "node -e \"fetch('http://localhost:3000/api/grid/health').then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2))).catch(e=>console.error('Error:',e.message))\"",
     "grid:teams": "node -e \"fetch('http://localhost:3000/api/teams?q=faze').then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2))).catch(e=>console.error('Error:',e.message))\"",
     "grid:scout": "node -e \"fetch('http://localhost:3000/api/teams?q=faze&limit=1').then(r=>r.json()).then(d=>{const team=d.teams[0];if(!team)throw new Error('No team found');return fetch('http://localhost:3000/api/scout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({teamId:team.id,game:'lol'})}).then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2)));}).catch(e=>console.error('Error:',e.message))\"",

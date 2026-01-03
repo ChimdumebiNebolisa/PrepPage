@@ -189,6 +189,8 @@ async function main(): Promise<void> {
     daysBack: Math.ceil(HOURS / 24),
     maxSeries: 10,
     debug: true, // Request debug info
+    windowDir: WINDOW_DIR,
+    hours: HOURS,
   };
 
   if (TITLE_ID) {
@@ -237,34 +239,56 @@ async function main(): Promise<void> {
 
   log(`Scout returned success with data for team: ${data.data.teamName || 'unknown'}`);
 
+  // Print debug counters from /api/scout response
+  if (data.debug) {
+    console.log('\n📊 Debug Counters:');
+    console.log(`  seriesFetchedBeforeTeamFilter: ${data.debug.seriesFetchedBeforeTeamFilter ?? data.debug.totalSeriesFetched ?? 'unknown'}`);
+    console.log(`  seriesAfterTeamFilter: ${data.debug.seriesAfterTeamFilter ?? data.debug.totalSeriesAfterFilter ?? 'unknown'}`);
+    console.log(`  seriesWithFilesCount: ${data.debug.seriesWithFilesCount ?? 'unknown'}`);
+    console.log(`  seriesWithStateCount: ${data.debug.seriesWithStateCount ?? 'unknown'}`);
+    if (data.debug.sampleSeriesIds && Array.isArray(data.debug.sampleSeriesIds)) {
+      console.log(`  sampleSeriesIds (first 5): ${data.debug.sampleSeriesIds.slice(0, 5).join(', ')}`);
+    }
+  }
+
   // Check MIN_SERIES requirement (if STRICT or MIN_SERIES explicitly set)
   if (MIN_SERIES > 0) {
-    let seriesCount = 0;
-    
-    // Try to get count from debug info first (most accurate)
-    if (data.debug?.totalSeriesAfterFilter !== undefined) {
-      seriesCount = data.debug.totalSeriesAfterFilter;
-    } else if (data.debug?.seriesEdges !== undefined) {
-      seriesCount = data.debug.seriesEdges.length;
-    } else if (data.data?.sampleSize !== undefined) {
-      seriesCount = data.data.sampleSize;
-    }
+    const seriesFetchedBeforeTeamFilter = data.debug?.seriesFetchedBeforeTeamFilter ?? data.debug?.totalSeriesFetched ?? 0;
+    const seriesAfterFilter = data.debug?.seriesAfterTeamFilter ?? data.debug?.totalSeriesAfterFilter ?? 0;
 
-    if (seriesCount < MIN_SERIES) {
+    // Fail if seriesFetchedBeforeTeamFilter < MIN_SERIES
+    if (seriesFetchedBeforeTeamFilter < MIN_SERIES) {
       console.error(`\n❌ CHECK FAILED: SCOUT`);
-      console.error(`   Found ${seriesCount} series, but MIN_SERIES=${MIN_SERIES} is required`);
+      console.error(`   seriesFetchedBeforeTeamFilter (${seriesFetchedBeforeTeamFilter}) < MIN_SERIES (${MIN_SERIES})`);
       console.error(`   Suggestions:`);
       console.error(`   - Increase HOURS (current: ${HOURS})`);
       console.error(`   - Change WINDOW_DIR (current: ${WINDOW_DIR})`);
       console.error(`   - Try a team with upcoming/past matches in the time window`);
       console.error(`   - Use explicit GTE/LTE with known series dates`);
       if (data.debug) {
-        console.error(`   Debug info: ${JSON.stringify(data.debug)}`);
+        console.error(`   Debug info: ${JSON.stringify(data.debug, null, 2)}`);
       }
       process.exit(1);
     }
 
-    log(`✓ Series count (${seriesCount}) meets MIN_SERIES requirement (${MIN_SERIES})`);
+    // Fail if seriesAfterFilter < MIN_SERIES
+    if (seriesAfterFilter < MIN_SERIES) {
+      console.error(`\n❌ CHECK FAILED: SCOUT`);
+      console.error(`   seriesAfterTeamFilter (${seriesAfterFilter}) < MIN_SERIES (${MIN_SERIES})`);
+      console.error(`   Suggestions:`);
+      console.error(`   - Increase HOURS (current: ${HOURS})`);
+      console.error(`   - Change WINDOW_DIR (current: ${WINDOW_DIR})`);
+      console.error(`   - Try a different team that appears in more series`);
+      console.error(`   - Use explicit GTE/LTE with known series dates`);
+      if (data.debug) {
+        console.error(`   Debug info: ${JSON.stringify(data.debug, null, 2)}`);
+      }
+      process.exit(1);
+    }
+
+    log(`✓ Series counts meet MIN_SERIES requirement (${MIN_SERIES})`);
+    log(`  - seriesFetchedBeforeTeamFilter: ${seriesFetchedBeforeTeamFilter}`);
+    log(`  - seriesAfterTeamFilter: ${seriesAfterFilter}`);
   }
 
   // Validate client-side filtering worked

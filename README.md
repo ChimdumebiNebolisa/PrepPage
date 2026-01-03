@@ -252,6 +252,107 @@ Debug responses include:
 - Check that series responses include `teams.baseInfo.id` structure
 - Verify the teamId format matches between search and scout endpoints
 
+## Golden Path Validation
+
+The golden path validation sequence provides an end-to-end proof that:
+1. We can fetch Central Data series IDs for a real title/tournament/window
+2. We can pick a teamId that actually appears in those series (not by name search)
+3. At least one seriesId has File Download and/or Series State evidence
+
+### Prerequisites
+
+- Development server must be running (`npm run dev`)
+- `GRID_API_KEY` must be set in `.env.local` (or environment)
+
+### Validation Sequence (PowerShell)
+
+```powershell
+# 1) Choose a title/tournaments/window that returns series (your UI can do this too).
+# Optional: Set TITLE_ID, TOURNAMENT_IDS, WINDOW_DIR, HOURS
+# Defaults: WINDOW_DIR="next", HOURS=336 (14 days)
+
+# 2) Pick a real team from a real series:
+npm run pick:grid:team
+
+# Output will show:
+# PICKED_SERIES_ID=...
+# PICKED_TEAM_ID=...
+# PICKED_TEAM_NAME=...
+
+# 3) Run strict verification using the picked teamId:
+$env:STRICT="1"
+$env:MIN_SERIES="1"
+$env:WINDOW_DIR="next"
+$env:HOURS="336"
+# Set TEAM_ID from the picker output:
+$env:TEAM_ID="<<PICKED_TEAM_ID>>"
+npm run verify:grid
+
+# 4) Prove File Download exists for at least one seriesId:
+$env:SERIES_ID="<<PICKED_SERIES_ID>>"
+npm run prove:file-download
+```
+
+### Validation Sequence (Bash)
+
+```bash
+# 1) Choose a title/tournaments/window that returns series
+# Optional: Set TITLE_ID, TOURNAMENT_IDS, WINDOW_DIR, HOURS
+# Defaults: WINDOW_DIR="next", HOURS=336 (14 days)
+
+# 2) Pick a real team from a real series:
+npm run pick:grid:team
+
+# Output will show:
+# PICKED_SERIES_ID=...
+# PICKED_TEAM_ID=...
+# PICKED_TEAM_NAME=...
+
+# 3) Run strict verification using the picked teamId:
+STRICT=1 MIN_SERIES=1 WINDOW_DIR=next HOURS=336 TEAM_ID=<<PICKED_TEAM_ID>> npm run verify:grid
+
+# 4) Prove File Download exists for at least one seriesId:
+SERIES_ID=<<PICKED_SERIES_ID>> npm run prove:file-download
+```
+
+### Scripts Reference
+
+#### `pick:grid:team`
+
+Fetches series from Central Data (without team filtering) and picks a real teamId from the first series that has teams.
+
+**Environment Variables:**
+- `TITLE_ID` (optional): Title ID for filtering
+- `TOURNAMENT_IDS` (optional): Comma-separated tournament IDs
+- `WINDOW_DIR` (optional, default: `"next"`): Time window direction - `"past"` or `"next"`
+- `HOURS` (optional, default: `336`): Hours for time window
+
+**Output:**
+- `PICKED_SERIES_ID=...`
+- `PICKED_TEAM_ID=...`
+- `PICKED_TEAM_NAME=...`
+
+#### `prove:file-download`
+
+Calls `/api/grid/file-download/list?seriesId=SERIES_ID` and verifies at least 1 file is returned. If empty, automatically tries the next 3 seriesIds from `SAMPLE_SERIES_IDS`.
+
+**Environment Variables:**
+- `BASE_URL` (optional, default: `http://localhost:3000`): API base URL
+- `SERIES_ID` (required): Series ID to check
+- `SAMPLE_SERIES_IDS` (optional): Comma-separated list of alternative series IDs to try
+
+**Output:**
+- Success: Lists file IDs, fileNames, and statuses
+- Failure: Clear conclusion message if no files found for any seriesId
+
+### Strict Mode Enhancements
+
+When `STRICT=1` is set in `verify:grid`:
+- `MIN_SERIES` defaults to `1` if not explicitly set
+- Fails (exit 1) if `seriesFetchedBeforeTeamFilter < MIN_SERIES`
+- Fails (exit 1) if `seriesAfterTeamFilter < MIN_SERIES`
+- Prints debug counters: `seriesFetchedBeforeTeamFilter`, `seriesAfterTeamFilter`, `seriesWithFilesCount`, `seriesWithStateCount`, `sampleSeriesIds`
+
 ## License
 
 Licensed under [MIT](LICENSE).
