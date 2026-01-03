@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ScoutResponse, TeamReport, Tendency, Player, Champion, Composition, EvidenceItem } from "@/lib/types";
 import { safeJson } from "@/lib/http";
+import { toIsoUtcString, ensureIso8601WithTimezone } from "@/lib/datetime";
 
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 const GRID_FILE_DOWNLOAD_BASE = "https://api.grid.gg/file-download";
@@ -85,12 +86,13 @@ export async function POST(req: NextRequest) {
       const teamName = team.name;
 
       // Step 2: Find recent series
-      // Calculate time window using ISO 8601 format
+      // Calculate time window using ISO 8601 format with timezone
       const now = new Date();
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-      const gte = cutoffDate.toISOString();
-      const lte = now.toISOString();
+      // Ensure ISO-8601 strings with timezone (always ends with 'Z' from toISOString)
+      const gte = toIsoUtcString(cutoffDate);
+      const lte = toIsoUtcString(now);
 
       let seriesEdges: any[] = [];
 
@@ -139,7 +141,7 @@ export async function POST(req: NextRequest) {
           // or use the first tournament ID if multiple exist
           const tournamentId = tournamentIds[0]; // Use first tournament for now
           const seriesQuery = `
-            query GetSeriesByTournaments($tournamentId: ID!, $gte: DateTime!, $lte: DateTime!) {
+            query GetSeriesByTournaments($tournamentId: ID!, $gte: String!, $lte: String!) {
               allSeries(
                 filter: {
                   tournament: { id: { in: [$tournamentId] }, includeChildren: { equals: true } }
@@ -172,22 +174,26 @@ export async function POST(req: NextRequest) {
             }
           `;
 
-      const seriesResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": GRID_API_KEY,
-        },
+          // Ensure ISO-8601 strings with timezone before passing to GraphQL
+          const gteIso = ensureIso8601WithTimezone(gte);
+          const lteIso = ensureIso8601WithTimezone(lte);
+
+          const seriesResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": GRID_API_KEY,
+            },
             body: JSON.stringify({
               query: seriesQuery,
               variables: {
                 tournamentId,
-                gte,
-                lte,
+                gte: gteIso,
+                lte: lteIso,
               },
             }),
-        signal: controller.signal,
-      });
+            signal: controller.signal,
+          });
 
       const seriesData = await safeJson(seriesResponse, "series_query");
 
@@ -207,9 +213,10 @@ export async function POST(req: NextRequest) {
         filterParts.push(`startTimeScheduled: { gte: $gte, lte: $lte }`);
 
         // Build query with conditional titleId variable
+        // Note: Central Data expects startTimeScheduled range values as String (ISO-8601), not DateTime
         const queryVars = titleId
-          ? `$titleId: String!, $gte: DateTime!, $lte: DateTime!`
-          : `$gte: DateTime!, $lte: DateTime!`;
+          ? `$titleId: String!, $gte: String!, $lte: String!`
+          : `$gte: String!, $lte: String!`;
 
         const seriesQuery = `
           query GetRecentSeries(${queryVars}) {
@@ -244,9 +251,13 @@ export async function POST(req: NextRequest) {
           }
         `;
 
+        // Ensure ISO-8601 strings with timezone before passing to GraphQL
+        const gteIso = ensureIso8601WithTimezone(gte);
+        const lteIso = ensureIso8601WithTimezone(lte);
+
         const variables: any = {
-          gte,
-          lte,
+          gte: gteIso,
+          lte: lteIso,
         };
         if (titleId) {
           variables.titleId = titleId;
@@ -280,10 +291,52 @@ export async function POST(req: NextRequest) {
       const totalSeriesAfterFilter = filteredSeriesEdges.length;
 
       if (filteredSeriesEdges.length === 0) {
-        return NextResponse.json(
-          { success: false, code: "NO_SERIES_FOUND" },
-          { status: 404 }
-        );
+        // Return HTTP 200 with success: true but code: NO_SERIES_FOUND
+        // This indicates the request succeeded but found no series in the window
+        // Reserve 4xx/5xx for actual API/validation failures
+        const emptyResponse: ScoutResponse = {
+          success: true,
+          source: "GRID",
+          code: "NO_SERIES_FOUND",
+          data: {
+            teamName,
+            region: "Unknown",
+            lastUpdated: new Date().toISOString().split('T')[0],
+            sampleSize: 0,
+            dateRange: `Last ${daysBack} days`,
+            tendencies: [],
+            players: [],
+            compositions: [],
+            evidence: [
+              {
+                metric: "Matches Analyzed",
+                value: "0",
+                sampleSize: "0 series",
+              },
+              {
+                metric: "Date Range",
+                value: `Last ${daysBack} days`,
+                sampleSize: `${daysBack} days`,
+              },
+              {
+                metric: "Data Source",
+                value: "GRID API",
+                sampleSize: "No series found",
+              },
+            ],
+          },
+        };
+
+        if (debug) {
+          emptyResponse.debug = {
+            totalSeriesFetched,
+            totalSeriesAfterFilter,
+            teamIdUsed: teamId,
+            seriesEdges: [],
+          };
+        }
+
+        return NextResponse.json(emptyResponse);
       }
 
       // Sort by startTimeScheduled descending and limit to maxSeries

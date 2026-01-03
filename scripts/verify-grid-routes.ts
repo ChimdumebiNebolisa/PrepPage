@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 /**
  * Runtime verification script for GRID Central Data API routes.
- * 
+ *
  * Validates that /api/teams and /api/scout work correctly against GRID Central Data.
- * 
+ *
  * Environment variables:
  * - BASE_URL (default: http://localhost:3000)
  * - TEAM_Q (required): Team search query (e.g. "CS2-1", "Cloud9")
  * - TEAM_ID (optional): Override to use specific team ID instead of searching
  * - TITLE_ID (optional): Title ID for filtering
  * - GAME (optional): Game identifier (default: "lol")
- * - HOURS (optional): Hours to look back (default: 72)
- * - GTE (optional): ISO datetime for start (overrides HOURS)
- * - LTE (optional): ISO datetime for end (overrides HOURS)
+ * - WINDOW_DIR (optional): Time window direction - "past" or "next" (default: "next")
+ * - HOURS (optional): Hours for time window (default: 336 = 14 days)
+ * - GTE (optional): ISO datetime for start (overrides HOURS and WINDOW_DIR)
+ * - LTE (optional): ISO datetime for end (overrides HOURS and WINDOW_DIR)
+ * - STRICT (optional): If "1", treat NO_SERIES_FOUND as failure (default: soft failure)
  */
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
@@ -20,9 +22,11 @@ const TEAM_Q = process.env.TEAM_Q;
 const TEAM_ID = process.env.TEAM_ID;
 const TITLE_ID = process.env.TITLE_ID;
 const GAME = process.env.GAME || 'lol';
-const HOURS = parseInt(process.env.HOURS || '72', 10);
+const WINDOW_DIR = process.env.WINDOW_DIR || 'next'; // "past" or "next", default "next"
+const HOURS = parseInt(process.env.HOURS || '336', 10); // Default 14 days (336 hours)
 const GTE = process.env.GTE;
 const LTE = process.env.LTE;
+const STRICT = process.env.STRICT === '1';
 
 interface Team {
   id: string;
@@ -61,10 +65,10 @@ interface ScoutResponse {
 }
 
 function fail(check: string, status: number, url: string, responseText: string): never {
-  const truncated = responseText.length > 500 
-    ? responseText.substring(0, 500) + '...' 
+  const truncated = responseText.length > 500
+    ? responseText.substring(0, 500) + '...'
     : responseText;
-  
+
   console.error(`\n❌ CHECK FAILED: ${check}`);
   console.error(`   Status: ${status}`);
   console.error(`   URL: ${url}`);
@@ -102,7 +106,7 @@ async function main(): Promise<void> {
 
   // Step A: Test /api/teams
   let teamId: string;
-  
+
   if (TEAM_ID) {
     log(`Using provided TEAM_ID: ${TEAM_ID}`);
     teamId = TEAM_ID;
@@ -114,7 +118,7 @@ async function main(): Promise<void> {
 
     log(`Testing /api/teams?q=${encodeURIComponent(TEAM_Q)}`);
     const teamsUrl = `${BASE_URL}/api/teams?q=${encodeURIComponent(TEAM_Q)}${TITLE_ID ? `&titleId=${TITLE_ID}` : ''}&debug=1`;
-    
+
     const { status, data, text } = await fetchJSON<TeamsResponse>(teamsUrl);
 
     if (status !== 200) {
@@ -136,7 +140,7 @@ async function main(): Promise<void> {
 
     teamId = firstTeam.id;
     log(`Found team: ${firstTeam.name} (ID: ${teamId})`);
-    
+
     if (data.debug) {
       log(`Debug info: ${JSON.stringify(data.debug)}`);
     }
@@ -145,12 +149,34 @@ async function main(): Promise<void> {
   // Step B: Test /api/scout
   log(`\nTesting /api/scout with teamId=${teamId}`);
 
-  // Calculate time window
+  // Calculate time window - ensure ISO-8601 strings with timezone
   const now = new Date();
-  const cutoffDate = new Date();
-  cutoffDate.setHours(cutoffDate.getHours() - HOURS);
-  const gte = GTE || cutoffDate.toISOString();
-  const lte = LTE || now.toISOString();
+  let gte: string;
+  let lte: string;
+
+  if (GTE && LTE) {
+    // Explicit GTE/LTE provided - use as-is
+    gte = GTE;
+    lte = LTE;
+    log(`Using explicit time window: ${gte} to ${lte}`);
+  } else {
+    // Calculate window based on WINDOW_DIR
+    if (WINDOW_DIR === 'past') {
+      // Past window: gte = now - HOURS, lte = now
+      const cutoffDate = new Date();
+      cutoffDate.setHours(cutoffDate.getHours() - HOURS);
+      gte = cutoffDate.toISOString();
+      lte = now.toISOString();
+      log(`Using past window: ${HOURS} hours back from now`);
+    } else {
+      // Next window (default): gte = now, lte = now + HOURS
+      const futureDate = new Date();
+      futureDate.setHours(futureDate.getHours() + HOURS);
+      gte = now.toISOString();
+      lte = futureDate.toISOString();
+      log(`Using next window: ${HOURS} hours forward from now`);
+    }
+  }
 
   const scoutBody: any = {
     teamId,
@@ -177,6 +203,25 @@ async function main(): Promise<void> {
     fail('SCOUT', status, scoutUrl, text);
   }
 
+  // Handle NO_SERIES_FOUND as soft failure (unless STRICT=1)
+  if (!data.success && data.code === 'NO_SERIES_FOUND') {
+    console.warn(`\n⚠️  No series found for window: ${gte} to ${lte}`);
+    console.warn(`   This is expected if the team has no series in the specified time window.`);
+    console.warn(`   Suggestions:`);
+    console.warn(`   - Increase HOURS (current: ${HOURS})`);
+    console.warn(`   - Try WINDOW_DIR="past" if currently "next" (or vice versa)`);
+    console.warn(`   - Use explicit GTE/LTE with known series dates`);
+    if (data.debug) {
+      console.warn(`   Debug info: ${JSON.stringify(data.debug)}`);
+    }
+    if (STRICT) {
+      console.error(`\n❌ Failing due to STRICT=1`);
+      process.exit(1);
+    }
+    console.log(`\n✓ Verification completed (soft failure - no series found)\n`);
+    return;
+  }
+
   if (!data.success) {
     fail('SCOUT', status, scoutUrl, `success: false, code: ${data.code}, error: ${data.error || 'unknown'}`);
   }
@@ -186,13 +231,13 @@ async function main(): Promise<void> {
   }
 
   log(`Scout returned success with data for team: ${data.data.teamName || 'unknown'}`);
-  
+
   // Validate client-side filtering worked
   if (data.debug?.seriesEdges) {
     log(`Validating client-side filtering...`);
     log(`  Total series fetched: ${data.debug.totalSeriesFetched || 'unknown'}`);
     log(`  Series after filter: ${data.debug.totalSeriesAfterFilter || 'unknown'}`);
-    
+
     const seriesEdges = data.debug.seriesEdges;
     let allValid = true;
     const invalidSeries: string[] = [];

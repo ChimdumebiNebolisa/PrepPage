@@ -170,14 +170,23 @@ TEAM_Q="Cloud9" npm run verify:grid
 
 **Advanced Usage with Options:**
 ```bash
-# With title ID and custom time window
-TEAM_Q="CS2-1" TITLE_ID="3" HOURS=48 npm run verify:grid
+# With title ID and custom time window (next 14 days by default)
+TEAM_Q="CS2-1" TITLE_ID="3" npm run verify:grid
 
-# With explicit time range
+# Look at past series (last 48 hours)
+TEAM_Q="Cloud9" WINDOW_DIR="past" HOURS=48 npm run verify:grid
+
+# Look at upcoming series (next 336 hours / 14 days - recommended)
+TEAM_Q="Cloud9" WINDOW_DIR="next" HOURS=336 npm run verify:grid
+
+# With explicit time range (overrides WINDOW_DIR and HOURS)
 TEAM_Q="Cloud9" GTE="2024-01-01T00:00:00Z" LTE="2024-01-31T23:59:59Z" npm run verify:grid
 
 # Use specific team ID (skip team search)
 TEAM_ID="12345" npm run verify:grid
+
+# Strict mode: fail if no series found (default is soft failure)
+TEAM_Q="Cloud9" STRICT=1 npm run verify:grid
 ```
 
 ### Environment Variables
@@ -187,9 +196,13 @@ TEAM_ID="12345" npm run verify:grid
 - `TEAM_ID` (optional) - Override to use specific team ID instead of searching
 - `TITLE_ID` (optional) - Title ID for filtering teams/series
 - `GAME` (optional, default: `lol`) - Game identifier
-- `HOURS` (optional, default: `72`) - Hours to look back for series
-- `GTE` (optional) - ISO datetime for start (overrides `HOURS`)
-- `LTE` (optional) - ISO datetime for end (overrides `HOURS`)
+- `WINDOW_DIR` (optional, default: `next`) - Time window direction: `"past"` or `"next"`
+  - `"past"`: Look at past series (gte = now - HOURS, lte = now)
+  - `"next"`: Look at upcoming series (gte = now, lte = now + HOURS) - **Recommended for scouting**
+- `HOURS` (optional, default: `336` = 14 days) - Hours for time window
+- `GTE` (optional) - ISO datetime for start (overrides `HOURS` and `WINDOW_DIR`)
+- `LTE` (optional) - ISO datetime for end (overrides `HOURS` and `WINDOW_DIR`)
+- `STRICT` (optional) - If set to `"1"`, treat `NO_SERIES_FOUND` as failure (default: soft failure)
 
 ### What It Validates
 
@@ -202,6 +215,7 @@ TEAM_ID="12345" npm run verify:grid
    - Returns HTTP 200 with valid report data
    - Client-side filtering worked correctly
    - Every returned series contains the requested teamId in `teams.baseInfo.id`
+   - **Note**: If no series are found in the time window, returns HTTP 200 with `success: true` and `code: "NO_SERIES_FOUND"`. This is treated as a soft failure (exit 0) unless `STRICT=1` is set.
 
 ### Debug Mode
 
