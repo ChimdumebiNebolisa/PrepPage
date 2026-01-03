@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { ScoutResponse, TeamReport, Tendency, Player, Champion, Composition, EvidenceItem } from "@/lib/types";
 import { safeJson } from "@/lib/http";
 import { toIsoUtcString, ensureIso8601WithTimezone } from "@/lib/datetime";
+import { getDefaultTournamentIds } from "@/lib/hackathon-tournaments";
+import { getSeriesStateGraphqlUrl, getSeriesStateTier, getSeriesStateUrlHost } from "@/lib/grid-endpoints";
 
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 const GRID_FILE_DOWNLOAD_BASE = "https://api.grid.gg/file-download";
-const GRID_SERIES_STATE_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/live-data-feed/series-state/graphql";
 
 export const runtime = "nodejs";
 
@@ -129,29 +130,33 @@ export async function POST(req: NextRequest) {
       let seriesEdges: any[] = [];
       let tournamentsSelected: string[] = [];
       let tournamentsTotalCount = 0;
+      let tournamentsSelectedSource = '';
       let widenWindowAttempted = false;
       let originalGte = gte;
       let originalLte = lte;
 
       // Helper function to fetch series for tournaments
-      const fetchSeriesForTournaments = async (tournamentIdsToUse: string[]): Promise<any[]> => {
+      // Milestone B: Match Quickstart query shape exactly with pagination support
+      const fetchSeriesForTournaments = async (tournamentIdsToUse: string[], maxSeries?: number): Promise<any[]> => {
         if (tournamentIdsToUse.length === 0) {
           return [];
         }
 
-        // Note: GraphQL tournament filter uses a single ID, so we need to query each tournament
-        // OR use a workaround: query all tournaments and filter client-side
-        // For now, we'll query the first tournament (can be extended to query all)
-        const tournamentId = tournamentIdsToUse[0];
-
+        const gteIso = ensureIso8601WithTimezone(gte);
+        const lteIso = ensureIso8601WithTimezone(lte);
+        
+        // Milestone B: Support multiple tournament IDs in the 'in' array
+        // Per Quickstart: filter: { tournament: { id: { in: <ID> }, includeChildren: { equals: true } } }
         const seriesQuery = `
-          query GetSeriesByTournaments($tournamentId: ID!, $gte: String!, $lte: String!) {
+          query GetSeriesByTournaments($tournamentIds: [ID!]!, $gte: String!, $lte: String!, $first: Int, $after: String) {
             allSeries(
               filter: {
-                tournament: { id: { in: [$tournamentId] }, includeChildren: { equals: true } }
+                tournament: { id: { in: $tournamentIds }, includeChildren: { equals: true } }
                 startTimeScheduled: { gte: $gte, lte: $lte }
               }
               orderBy: StartTimeScheduled
+              first: $first
+              after: $after
             ) {
               totalCount
               edges {
@@ -170,40 +175,81 @@ export async function POST(req: NextRequest) {
                   }
                 }
               }
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
             }
           }
         `;
 
-        const gteIso = ensureIso8601WithTimezone(gte);
-        const lteIso = ensureIso8601WithTimezone(lte);
+        let allEdges: any[] = [];
+        let hasNextPage = true;
+        let cursor: string | null = null;
+        const pageSize = 100; // Fetch in pages of 100
+        const maxToFetch = maxSeries || 1000; // Default limit to prevent excessive queries
 
-        const seriesResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": GRID_API_KEY,
-          },
-          body: JSON.stringify({
-            query: seriesQuery,
-            variables: {
-              tournamentId,
-              gte: gteIso,
-              lte: lteIso,
+        while (hasNextPage && allEdges.length < maxToFetch) {
+          const variables: any = {
+            tournamentIds: tournamentIdsToUse,
+            gte: gteIso,
+            lte: lteIso,
+            first: Math.min(pageSize, maxToFetch - allEdges.length),
+          };
+          
+          if (cursor) {
+            variables.after = cursor;
+          }
+
+          const seriesResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": GRID_API_KEY,
             },
-          }),
-          signal: controller.signal,
-        });
+            body: JSON.stringify({
+              query: seriesQuery,
+              variables,
+            }),
+            signal: controller.signal,
+          });
 
-        const seriesData = await safeJson(seriesResponse, "series_query");
-        if (seriesData.errors) {
-          throw new Error(seriesData.errors.map((e: any) => e.message).join(", "));
+          const seriesData = await safeJson(seriesResponse, "series_query");
+          if (seriesData.errors) {
+            throw new Error(seriesData.errors.map((e: any) => e.message).join(", "));
+          }
+
+          const edges = seriesData.data?.allSeries?.edges || [];
+          allEdges.push(...edges);
+          
+          const pageInfo = seriesData.data?.allSeries?.pageInfo;
+          hasNextPage = pageInfo?.hasNextPage || false;
+          cursor = pageInfo?.endCursor || null;
+
+          // If we got fewer results than requested, we've reached the end
+          if (edges.length < pageSize) {
+            hasNextPage = false;
+          }
         }
 
-        return seriesData.data?.allSeries?.edges || [];
+        return allEdges;
       };
 
-      // Step 2a: Get tournaments if titleId provided
-      if (titleId && (!tournamentIds || tournamentIds.length === 0)) {
+      // Step 2a: Determine tournament IDs to use
+      // Milestone A: Default to hackathon whitelist unless ALLOW_CUSTOM_TOURNAMENTS=1
+      const ALLOW_CUSTOM_TOURNAMENTS = process.env.ALLOW_CUSTOM_TOURNAMENTS === '1';
+      
+      if (tournamentIds && tournamentIds.length > 0 && ALLOW_CUSTOM_TOURNAMENTS) {
+        // Custom tournaments allowed via env flag
+        tournamentsSelected = tournamentIds;
+        tournamentsSelectedSource = 'custom';
+      } else if (tournamentIds && tournamentIds.length > 0 && !ALLOW_CUSTOM_TOURNAMENTS) {
+        // Custom tournaments provided but not allowed - force whitelist
+        console.warn(`Custom tournamentIds provided but ALLOW_CUSTOM_TOURNAMENTS is not set. Forcing whitelist. Provided: ${tournamentIds.slice(0, 3).join(', ')}${tournamentIds.length > 3 ? '...' : ''}`);
+        tournamentsSelected = getDefaultTournamentIds();
+        tournamentsSelectedSource = 'whitelist';
+      } else if (titleId) {
+        // Fetch tournaments for the title, but filter to whitelist subset
         const tournamentsQuery = `
           query GetTournaments($titleId: String!) {
             tournaments(filter: { title: { id: { in: [$titleId] } } }) {
@@ -238,14 +284,37 @@ export async function POST(req: NextRequest) {
 
         tournamentsTotalCount = tournamentsData.data?.tournaments?.totalCount || 0;
         const tournamentEdges = tournamentsData.data?.tournaments?.edges || [];
-
-        // Use all tournaments if none specified, otherwise use provided ones
-        tournamentsSelected = tournamentIds && tournamentIds.length > 0
-          ? tournamentIds
-          : tournamentEdges.map((edge: any) => edge.node.id);
-      } else if (tournamentIds && tournamentIds.length > 0) {
-        tournamentsSelected = tournamentIds;
+        const allTitleTournaments = tournamentEdges.map((edge: any) => edge.node.id);
+        
+        // Filter to whitelist subset for the chosen title
+        const whitelist = getDefaultTournamentIds();
+        tournamentsSelected = allTitleTournaments.filter((id: string) => whitelist.includes(id));
+        
+        if (tournamentsSelected.length === 0) {
+          // If no whitelist tournaments match, fall back to full whitelist
+          tournamentsSelected = whitelist;
+          tournamentsSelectedSource = 'whitelist';
+        } else {
+          tournamentsSelectedSource = 'whitelist';
+        }
+      } else {
+        // Default to Hackathon whitelist (never empty)
+        tournamentsSelected = getDefaultTournamentIds();
+        tournamentsSelectedSource = 'whitelist';
       }
+
+      // Ensure we never have an empty tournament list
+      if (tournamentsSelected.length === 0) {
+        tournamentsSelected = getDefaultTournamentIds();
+        tournamentsSelectedSource = 'whitelist';
+        console.warn('Tournament list was empty, forced to whitelist default');
+      }
+
+      // Milestone A: Clear debug logging
+      console.log(`[DEBUG] tournamentsSource: ${tournamentsSelectedSource}`);
+      console.log(`[DEBUG] tournamentsCount: ${tournamentsSelected.length}`);
+      console.log(`[DEBUG] titleId: ${titleId || 'none'}`);
+      console.log(`[DEBUG] timeWindow: gte=${gte}, lte=${lte}`);
 
       // Step 2b: Fetch series with tournament filtering or time window
       const attemptFetch = async (): Promise<any[]> => {
@@ -396,6 +465,7 @@ export async function POST(req: NextRequest) {
             teamIdUsed: teamId,
             seriesEdges: [],
             tournamentsSelected,
+            tournamentsSelectedSource,
             tournamentsTotalCount,
             seriesFetchedBeforeTeamFilter,
             seriesAfterTeamFilter,
@@ -473,7 +543,8 @@ export async function POST(req: NextRequest) {
             }
           `;
 
-          const seriesStateResponse = await fetch(GRID_SERIES_STATE_GRAPHQL_ENDPOINT, {
+          const seriesStateUrl = getSeriesStateGraphqlUrl();
+          const seriesStateResponse = await fetch(seriesStateUrl, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -485,6 +556,14 @@ export async function POST(req: NextRequest) {
             }),
             signal: controller.signal,
           });
+
+          // Logging/telemetry: Always include tier, host, and HTTP status in debug output
+          const seriesStateTier = getSeriesStateTier();
+          const seriesStateUrlHost = getSeriesStateUrlHost();
+          const seriesStateHttpStatus = seriesStateResponse.status;
+          if (debug) {
+            console.log(`Series State check for ${seriesId}: tier=${seriesStateTier}, host=${seriesStateUrlHost}, httpStatus=${seriesStateHttpStatus}`);
+          }
 
           if (seriesStateResponse.ok) {
             const seriesStateData = await safeJson(seriesStateResponse, `series_state_${seriesId}`);
@@ -545,6 +624,7 @@ export async function POST(req: NextRequest) {
             totalSeriesAfterFilter: seriesAfterTeamFilter,
             teamIdUsed: teamId,
             tournamentsSelected,
+            tournamentsSelectedSource,
             tournamentsTotalCount,
             seriesFetchedBeforeTeamFilter,
             seriesAfterTeamFilter,
@@ -555,6 +635,8 @@ export async function POST(req: NextRequest) {
             widenWindowAttempted,
             timeWindow: { gte: originalGte, lte: originalLte },
             timeWindowAfterWiden: widenWindowAttempted ? { gte, lte } : undefined,
+            seriesStateTier: getSeriesStateTier(),
+            seriesStateUrlHost: getSeriesStateUrlHost(),
           };
         }
 
@@ -638,6 +720,7 @@ export async function POST(req: NextRequest) {
           totalSeriesAfterFilter: seriesAfterTeamFilter,
           teamIdUsed: teamId,
           tournamentsSelected,
+          tournamentsSelectedSource,
           tournamentsTotalCount,
           seriesFetchedBeforeTeamFilter,
           seriesAfterTeamFilter,
@@ -648,6 +731,8 @@ export async function POST(req: NextRequest) {
           widenWindowAttempted,
           timeWindow: { gte: originalGte, lte: originalLte },
           timeWindowAfterWiden: widenWindowAttempted ? { gte, lte } : undefined,
+          seriesStateTier: getSeriesStateTier(),
+          seriesStateUrlHost: getSeriesStateUrlHost(),
           seriesEdges: sortedSeriesEdges.map((edge: any) => ({
             node: {
               id: edge.node.id,

@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { safeJson } from "@/lib/http";
-
-// Open Access Series State GraphQL endpoint (Live Data Feed)
-const GRID_SERIES_STATE_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/live-data-feed/series-state/graphql";
+import { getSeriesStateGraphqlUrl, getSeriesStateTier, getSeriesStateUrlHost } from "@/lib/grid-endpoints";
 
 export const runtime = "nodejs";
 
@@ -41,8 +39,13 @@ export async function GET(req: NextRequest) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
+    // Get endpoint URL based on tier configuration
+    const seriesStateUrl = getSeriesStateGraphqlUrl();
+    const seriesStateTier = getSeriesStateTier();
+    const seriesStateUrlHost = getSeriesStateUrlHost();
+
     try {
-      const response = await fetch(GRID_SERIES_STATE_GRAPHQL_ENDPOINT, {
+      const response = await fetch(seriesStateUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -57,6 +60,10 @@ export async function GET(req: NextRequest) {
 
       clearTimeout(timeoutId);
 
+      // Logging/telemetry: Always include tier, host, and HTTP status in debug output
+      const seriesStateHttpStatus = response.status;
+      console.log(`Series State check for ${seriesId}: tier=${seriesStateTier}, host=${seriesStateUrlHost}, httpStatus=${seriesStateHttpStatus}`);
+
       const data = await safeJson(response, "series_state_query");
 
       // Check for GraphQL errors
@@ -65,7 +72,7 @@ export async function GET(req: NextRequest) {
         console.error("Series State GraphQL Error:", errorMessages);
         // GraphQL errors might indicate no state, bad query, or auth issues
         // Check if it's a "not found" type error
-        if (errorMessages.toLowerCase().includes("not found") || 
+        if (errorMessages.toLowerCase().includes("not found") ||
             errorMessages.toLowerCase().includes("does not exist")) {
           return NextResponse.json({
             success: false,
@@ -85,8 +92,8 @@ export async function GET(req: NextRequest) {
         if (response.status === 401 || response.status === 403) {
           console.error(`Series State Auth Error (HTTP ${response.status}): Unauthorized or forbidden`);
           return NextResponse.json(
-            { 
-              success: false, 
+            {
+              success: false,
               code: response.status === 401 ? "UNAUTHORIZED" : "FORBIDDEN",
               error: `HTTP ${response.status}: Authentication or authorization failed`,
             },
@@ -142,8 +149,8 @@ export async function GET(req: NextRequest) {
         }
         if (status === 401 || status === 403) {
           return NextResponse.json(
-            { 
-              success: false, 
+            {
+              success: false,
               code: status === 401 ? "UNAUTHORIZED" : "FORBIDDEN",
               error: err.message,
             },

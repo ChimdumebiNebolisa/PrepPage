@@ -14,8 +14,9 @@
  * - HOURS (optional): Hours for time window (default: 336 = 14 days)
  * - GTE (optional): ISO datetime for start (overrides HOURS and WINDOW_DIR)
  * - LTE (optional): ISO datetime for end (overrides HOURS and WINDOW_DIR)
- * - STRICT (optional): If "1", treat NO_SERIES_FOUND as failure (default: soft failure)
+ * - STRICT (optional): If "1", treat NO_SERIES_FOUND as failure and enforce MIN_EVIDENCE (default: soft failure)
  * - MIN_SERIES (optional): Minimum number of series required (default: 0, or 1 if STRICT=1)
+ * - MIN_EVIDENCE (optional): Minimum number of series with evidence (files or state) required (default: 0, or 1 if STRICT=1 and unset)
  */
 
 import { loadEnvConfig } from "@next/env";
@@ -34,6 +35,10 @@ const STRICT = process.env.STRICT === '1';
 // MIN_SERIES: default 0, or 1 if STRICT=1 and not explicitly set
 const MIN_SERIES = process.env.MIN_SERIES !== undefined
   ? parseInt(process.env.MIN_SERIES, 10)
+  : (STRICT ? 1 : 0);
+// MIN_EVIDENCE: default 0, or 1 if STRICT=1 and not explicitly set
+const MIN_EVIDENCE = process.env.MIN_EVIDENCE !== undefined
+  ? parseInt(process.env.MIN_EVIDENCE, 10)
   : (STRICT ? 1 : 0);
 
 interface Team {
@@ -59,6 +64,10 @@ interface ScoutResponse {
     totalSeriesFetched?: number;
     totalSeriesAfterFilter?: number;
     teamIdUsed?: string;
+    seriesWithFilesCount?: number;
+    seriesWithStateCount?: number;
+    seriesStateTier?: string;
+    seriesStateUrlHost?: string;
     seriesEdges?: Array<{
       node: {
         id: string;
@@ -243,12 +252,29 @@ async function main(): Promise<void> {
   log(`Scout returned success with data for team: ${data.data.teamName || 'unknown'}`);
 
   // Print debug counters from /api/scout response
+  const seriesWithFilesCount = data.debug?.seriesWithFilesCount ?? 0;
+  const seriesWithStateCount = data.debug?.seriesWithStateCount ?? 0;
+  const totalEvidenceCount = seriesWithFilesCount + seriesWithStateCount;
+
   if (data.debug) {
     console.log('\n📊 Debug Counters:');
     console.log(`  seriesFetchedBeforeTeamFilter: ${data.debug.seriesFetchedBeforeTeamFilter ?? data.debug.totalSeriesFetched ?? 'unknown'}`);
     console.log(`  seriesAfterTeamFilter: ${data.debug.seriesAfterTeamFilter ?? data.debug.totalSeriesAfterFilter ?? 'unknown'}`);
-    console.log(`  seriesWithFilesCount: ${data.debug.seriesWithFilesCount ?? 'unknown'}`);
-    console.log(`  seriesWithStateCount: ${data.debug.seriesWithStateCount ?? 'unknown'}`);
+    console.log(`  seriesWithFilesCount: ${seriesWithFilesCount}`);
+    console.log(`  seriesWithStateCount: ${seriesWithStateCount}`);
+    console.log(`  totalEvidenceCount: ${totalEvidenceCount}`);
+
+    // Print Series State tier and endpoint host
+    if (data.debug.seriesStateTier) {
+      console.log(`  seriesStateTier: ${data.debug.seriesStateTier}`);
+    }
+    if (data.debug.seriesStateUrlHost) {
+      console.log(`  seriesStateUrlHost: ${data.debug.seriesStateUrlHost}`);
+    }
+
+    if (MIN_EVIDENCE > 0) {
+      console.log(`  MIN_EVIDENCE threshold: ${MIN_EVIDENCE}`);
+    }
     if (data.debug.sampleSeriesIds && Array.isArray(data.debug.sampleSeriesIds)) {
       console.log(`  sampleSeriesIds (first 5): ${data.debug.sampleSeriesIds.slice(0, 5).join(', ')}`);
     }
@@ -292,6 +318,30 @@ async function main(): Promise<void> {
     log(`✓ Series counts meet MIN_SERIES requirement (${MIN_SERIES})`);
     log(`  - seriesFetchedBeforeTeamFilter: ${seriesFetchedBeforeTeamFilter}`);
     log(`  - seriesAfterTeamFilter: ${seriesAfterFilter}`);
+  }
+
+  // Check MIN_EVIDENCE requirement (if STRICT or MIN_EVIDENCE explicitly set)
+  if (MIN_EVIDENCE > 0) {
+    if (totalEvidenceCount < MIN_EVIDENCE) {
+      console.error(`\n❌ CHECK FAILED: SCOUT`);
+      console.error(`   totalEvidenceCount (${totalEvidenceCount}) < MIN_EVIDENCE (${MIN_EVIDENCE})`);
+      console.error(`   seriesWithFilesCount: ${seriesWithFilesCount}`);
+      console.error(`   seriesWithStateCount: ${seriesWithStateCount}`);
+      console.error(`   Note: Series exist but in-game data (files/state) is missing`);
+      console.error(`   Suggestions:`);
+      console.error(`   - Verify API key has access to file-download and series-state endpoints`);
+      console.error(`   - Try a different team/tournament that has in-game data available`);
+      console.error(`   - Check that series are from hackathon whitelisted tournaments`);
+      if (data.debug) {
+        console.error(`   Debug info: ${JSON.stringify(data.debug, null, 2)}`);
+      }
+      process.exit(1);
+    }
+
+    log(`✓ Evidence count meets MIN_EVIDENCE requirement (${MIN_EVIDENCE})`);
+    log(`  - totalEvidenceCount: ${totalEvidenceCount}`);
+    log(`  - seriesWithFilesCount: ${seriesWithFilesCount}`);
+    log(`  - seriesWithStateCount: ${seriesWithStateCount}`);
   }
 
   // Validate client-side filtering worked

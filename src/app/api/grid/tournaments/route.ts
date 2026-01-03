@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { safeJson } from "@/lib/http";
+import { getDefaultTournamentIds } from "@/lib/hackathon-tournaments";
 
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 
@@ -58,13 +59,20 @@ export async function GET(req: NextRequest) {
       throw new Error(data.errors.map((e: any) => e.message).join(", "));
     }
 
-    const tournaments = data.data?.tournaments?.edges?.map((edge: any) => edge.node) || [];
+    const allTournaments = data.data?.tournaments?.edges?.map((edge: any) => edge.node) || [];
+    
+    // Milestone A: Filter to whitelist subset for the chosen title
+    const whitelist = getDefaultTournamentIds();
+    const tournaments = allTournaments.filter((tournament: any) => 
+      whitelist.includes(tournament.id)
+    );
 
     return NextResponse.json({
       success: true,
       source: "GRID",
       tournaments,
-      totalCount: data.data?.tournaments?.totalCount || 0,
+      totalCount: tournaments.length,
+      totalCountUnfiltered: data.data?.tournaments?.totalCount || 0,
     });
   } catch (error: any) {
     console.error("Tournaments API Error:", error.message);

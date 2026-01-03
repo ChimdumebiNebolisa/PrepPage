@@ -282,8 +282,9 @@ npm run pick:grid:team
 # 3) Run strict verification using the picked teamId:
 $env:STRICT="1"
 $env:MIN_SERIES="1"
-$env:WINDOW_DIR="next"
-$env:HOURS="336"
+$env:MIN_EVIDENCE="1"
+$env:WINDOW_DIR="past"
+$env:HOURS="17520"
 # Set TEAM_ID from the picker output:
 $env:TEAM_ID="<<PICKED_TEAM_ID>>"
 npm run verify:grid
@@ -309,7 +310,7 @@ npm run pick:grid:team
 # PICKED_TEAM_NAME=...
 
 # 3) Run strict verification using the picked teamId:
-STRICT=1 MIN_SERIES=1 WINDOW_DIR=next HOURS=336 TEAM_ID=<<PICKED_TEAM_ID>> npm run verify:grid
+STRICT=1 MIN_SERIES=1 MIN_EVIDENCE=1 WINDOW_DIR=past HOURS=17520 TEAM_ID=<<PICKED_TEAM_ID>> npm run verify:grid
 
 # 4) Prove File Download exists for at least one seriesId:
 SERIES_ID=<<PICKED_SERIES_ID>> npm run prove:file-download
@@ -319,18 +320,22 @@ SERIES_ID=<<PICKED_SERIES_ID>> npm run prove:file-download
 
 #### `pick:grid:team`
 
-Fetches series from Central Data (without team filtering) and picks a real teamId from the first series that has teams.
+Fetches series from Central Data (without team filtering) and picks a real teamId from the first series that has evidence (files or state) and teams.
 
 **Environment Variables:**
 - `TITLE_ID` (optional): Title ID for filtering
-- `TOURNAMENT_IDS` (optional): Comma-separated tournament IDs
-- `WINDOW_DIR` (optional, default: `"next"`): Time window direction - `"past"` or `"next"`
-- `HOURS` (optional, default: `336`): Hours for time window
+- `TOURNAMENT_IDS` (optional): Comma-separated tournament IDs (defaults to Hackathon whitelist if not provided)
+- `WINDOW_DIR` (optional, default: `"past"`): Time window direction - `"past"` or `"next"`
+- `HOURS` (optional, default: `17520`): Hours for time window (17520 = ~2 years, aligned with hackathon scope)
+- `MAX_SERIES_TO_CHECK` (optional, default: `50`): Maximum number of series to check for evidence
+- `STRICT` (optional): If `"1"`, exit non-zero if no evidence found
 
 **Output:**
 - `PICKED_SERIES_ID=...`
 - `PICKED_TEAM_ID=...`
 - `PICKED_TEAM_NAME=...`
+- `PICKED_EVIDENCE=...` (values: "files", "state", or "files+state")
+- `PICKED_TOURNAMENT_IDS_USED=...` (first few tournament IDs used)
 
 #### `prove:file-download`
 
@@ -345,13 +350,63 @@ Calls `/api/grid/file-download/list?seriesId=SERIES_ID` and verifies at least 1 
 - Success: Lists file IDs, fileNames, and statuses
 - Failure: Clear conclusion message if no files found for any seriesId
 
+### Direct File Download Probe (No App Involved)
+
+You can directly test the File Download API without going through the app to verify that files are available for a specific series ID. This helps diagnose entitlement issues independently of the application code.
+
+#### Using the npm script:
+
+```bash
+# Set SERIES_ID and run the probe
+SERIES_ID="your-series-id-here" npm run probe:file-download:direct
+```
+
+**PowerShell Example:**
+```powershell
+$env:SERIES_ID="your-series-id-here"
+npm run probe:file-download:direct
+```
+
+#### Manual PowerShell probe:
+
+```powershell
+$seriesId = "your-series-id-here"
+$apiKey = $env:GRID_API_KEY
+
+$response = Invoke-WebRequest -Uri "https://api.grid.gg/file-download/list/$seriesId" `
+  -Headers @{ "x-api-key" = $apiKey } `
+  -Method GET
+
+$files = $response.Content | ConvertFrom-Json
+Write-Host "Files found: $($files.Count)"
+```
+
+#### Response Interpretation:
+
+- **HTTP 200 with files**: Files are available - if the app/proxy still fails, it indicates a selection bug in the application logic
+- **HTTP 200 with empty array (`[]`)**: Content not available for this `seriesId` - the series exists in Central Data but has no associated file downloads (see File Download API documentation for more details)
+- **HTTP 403**: Entitlement/scope issue - your API key doesn't have access to file downloads for this series
+- **HTTP 401**: Authentication failed - check your GRID_API_KEY
+
+**Exit Codes (npm script):**
+- `0`: HTTP 200 (even if empty array)
+- `2`: HTTP 403 (FORBIDDEN)
+- `3`: HTTP 401 (UNAUTHORIZED)
+- `4`: Other error
+
+**Note:** Do not include API keys or secrets in documentation or commit them to version control.
+
 ### Strict Mode Enhancements
 
 When `STRICT=1` is set in `verify:grid`:
 - `MIN_SERIES` defaults to `1` if not explicitly set
+- `MIN_EVIDENCE` defaults to `1` if not explicitly set
 - Fails (exit 1) if `seriesFetchedBeforeTeamFilter < MIN_SERIES`
 - Fails (exit 1) if `seriesAfterTeamFilter < MIN_SERIES`
-- Prints debug counters: `seriesFetchedBeforeTeamFilter`, `seriesAfterTeamFilter`, `seriesWithFilesCount`, `seriesWithStateCount`, `sampleSeriesIds`
+- Fails (exit 1) if `(seriesWithFilesCount + seriesWithStateCount) < MIN_EVIDENCE`
+- Prints debug counters: `seriesFetchedBeforeTeamFilter`, `seriesAfterTeamFilter`, `seriesWithFilesCount`, `seriesWithStateCount`, `totalEvidenceCount`, `MIN_EVIDENCE threshold`, `sampleSeriesIds`
+
+**Note:** The `MIN_EVIDENCE` check ensures that series not only exist, but also have in-game data (files or state) available. This prevents false positives where series exist in Central Data but have no associated file downloads or series state.
 
 ## License
 

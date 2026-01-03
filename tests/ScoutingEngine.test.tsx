@@ -33,7 +33,7 @@ describe('ScoutingEngine', () => {
     vi.stubGlobal('fetch', mockFetch);
 
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
-    
+
     // Wait for titles fetch to complete - titles call happens immediately on mount
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/api/grid/titles'));
@@ -44,7 +44,7 @@ describe('ScoutingEngine', () => {
 
     const input = screen.getByPlaceholderText(/start typing/i);
     await userEvent.click(input);
-    
+
     await waitFor(() => {
       expect(screen.getByText(/start typing to search teams/i)).toBeInTheDocument();
     }, { timeout: 1000 });
