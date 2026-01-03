@@ -21,7 +21,7 @@ interface DemoData {
   };
 }
 
-export default function ScoutingEngine({ onReportGenerated }: { onReportGenerated: (report: TeamReport, source: string) => void }) {
+export default function ScoutingEngine({ onReportGenerated }: { onReportGenerated: (report: TeamReport, source: string, debug?: ScoutResponse["debug"]) => void }) {
   const [teamName, setTeamName] = useState("");
   const [teamId, setTeamId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,8 +33,60 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
   const [searchMode, setSearchMode] = useState<"LIVE" | "DEMO" | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [useDemoTeams, setUseDemoTeams] = useState(false);
+  const [selectedTitleId, setSelectedTitleId] = useState<string | null>(null);
+  const [selectedTournamentIds, setSelectedTournamentIds] = useState<string[]>([]);
+  const [titles, setTitles] = useState<Array<{ id: string; name: string }>>([]);
+  const [tournaments, setTournaments] = useState<Array<{ id: string; name: string }>>([]);
+  const [loadingTitles, setLoadingTitles] = useState(false);
+  const [loadingTournaments, setLoadingTournaments] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Load titles on mount
+  useEffect(() => {
+    const fetchTitles = async () => {
+      setLoadingTitles(true);
+      try {
+        const response = await fetch("/api/grid/titles");
+        const data = await response.json();
+        if (data.success && data.titles) {
+          setTitles(data.titles);
+        }
+      } catch (err) {
+        console.error("Failed to fetch titles:", err);
+      } finally {
+        setLoadingTitles(false);
+      }
+    };
+    fetchTitles();
+  }, []);
+
+  // Load tournaments when title is selected
+  useEffect(() => {
+    if (!selectedTitleId) {
+      setTournaments([]);
+      setSelectedTournamentIds([]);
+      return;
+    }
+
+    const fetchTournaments = async () => {
+      setLoadingTournaments(true);
+      try {
+        const response = await fetch(`/api/grid/tournaments?titleId=${selectedTitleId}`);
+        const data = await response.json();
+        if (data.success && data.tournaments) {
+          setTournaments(data.tournaments);
+          // Auto-select all tournaments by default
+          setSelectedTournamentIds(data.tournaments.map((t: any) => t.id));
+        }
+      } catch (err) {
+        console.error("Failed to fetch tournaments:", err);
+      } finally {
+        setLoadingTournaments(false);
+      }
+    };
+    fetchTournaments();
+  }, [selectedTitleId]);
 
   // Debounced search - only call API if query is not empty
   useEffect(() => {
@@ -216,10 +268,26 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
     const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     try {
+      const requestBody: any = {
+        teamId,
+        game: "lol",
+        windowDir: "next", // Default to "next" for scouting
+        hours: 336, // 14 days default
+        debug: true,
+      };
+
+      if (selectedTitleId) {
+        requestBody.titleId = selectedTitleId;
+      }
+
+      if (selectedTournamentIds.length > 0) {
+        requestBody.tournamentIds = selectedTournamentIds;
+      }
+
       const response = await fetch("/api/scout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teamId, game: "lol" }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
@@ -239,8 +307,21 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
 
       const result: ScoutResponse = await response.json();
 
+      // Handle special codes with honest empty states
+      if (result.success && result.code === "NO_SERIES_FOUND") {
+        setError("No series found for the selected title/tournaments/window. Try widening the time window or selecting different tournaments.");
+        setLoading(false);
+        return;
+      }
+
+      if (result.success && result.code === "NO_IN_GAME_DATA") {
+        setError("Series found, but no in-game files/state available. This may be due to access restrictions or the series not having data yet.");
+        setLoading(false);
+        return;
+      }
+
       if (result.success && result.data) {
-        onReportGenerated(result.data, result.source || "GRID");
+        onReportGenerated(result.data, result.source || "GRID", result.debug);
         setLoading(false);
         return;
       }
@@ -372,7 +453,7 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
                         </div>
                       )}
                     </div>
-                  ) : teams.length === 0 ? (
+                  ) : (!teams || teams.length === 0) ? (
                     <div className="p-3 text-sm text-muted-foreground">No teams found.</div>
                   ) : (
                     <div>

@@ -24,14 +24,14 @@ export function filterSeriesByTeam(seriesEdges: any[], teamId: string): any[] {
 
 export async function POST(req: NextRequest) {
   try {
-    const { 
-      teamId, 
-      game = "lol", 
-      daysBack = 30, 
-      maxSeries = 8, 
-      titleId, 
+    const {
+      teamId,
+      game = "lol",
+      daysBack = 30,
+      maxSeries = 8,
+      titleId,
       tournamentIds, // Array of tournament IDs
-      useHackathonNarrowing = false, 
+      useHackathonNarrowing = false,
       debug = false,
       windowDir = "next", // "past" or "next"
       hours, // Override daysBack if provided
@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
         // OR use a workaround: query all tournaments and filter client-side
         // For now, we'll query the first tournament (can be extended to query all)
         const tournamentId = tournamentIdsToUse[0];
-        
+
         const seriesQuery = `
           query GetSeriesByTournaments($tournamentId: ID!, $gte: String!, $lte: String!) {
             allSeries(
@@ -237,7 +237,7 @@ export async function POST(req: NextRequest) {
 
         tournamentsTotalCount = tournamentsData.data?.tournaments?.totalCount || 0;
         const tournamentEdges = tournamentsData.data?.tournaments?.edges || [];
-        
+
         // Use all tournaments if none specified, otherwise use provided ones
         tournamentsSelected = tournamentIds && tournamentIds.length > 0
           ? tournamentIds
@@ -419,7 +419,129 @@ export async function POST(req: NextRequest) {
 
       const seriesIds = sortedSeriesEdges.map((edge: any) => edge.node.id);
 
-      // Step 4: For each series, get file download list and download state-grid JSON
+      // Step 4: Check in-game data availability (Milestone 4)
+      // Take first N series (N=10) to check for files/state
+      const seriesToCheck = seriesIds.slice(0, 10);
+      const seriesEvidence: Array<{
+        seriesId: string;
+        hasFiles: boolean;
+        fileTypesAvailable: string[];
+        hasSeriesState: boolean;
+      }> = [];
+
+      let seriesWithFilesCount = 0;
+      let seriesWithStateCount = 0;
+
+      for (const seriesId of seriesToCheck) {
+        let hasFiles = false;
+        let fileTypesAvailable: string[] = [];
+        let hasSeriesState = false;
+
+        // Check file download list
+        try {
+          const fileListResponse = await fetch(`${GRID_FILE_DOWNLOAD_BASE}/list/${seriesId}`, {
+            method: "GET",
+            headers: {
+              "x-api-key": GRID_API_KEY,
+            },
+            signal: controller.signal,
+          });
+
+          if (fileListResponse.ok) {
+            const fileList = await safeJson(fileListResponse, `file_list_${seriesId}`);
+            if (Array.isArray(fileList) && fileList.length > 0) {
+              hasFiles = true;
+              fileTypesAvailable = fileList.map((f: any) => f.id || f.fileName || 'unknown').filter(Boolean);
+              seriesWithFilesCount++;
+            }
+          }
+        } catch (err: any) {
+          // Silently continue - file list check failed
+          console.warn(`File list check failed for series ${seriesId}:`, err.message);
+        }
+
+        // Check series state
+        try {
+          const seriesStateResponse = await fetch(`https://api.grid.gg/series-state/${seriesId}`, {
+            method: "GET",
+            headers: {
+              "x-api-key": GRID_API_KEY,
+            },
+            signal: controller.signal,
+          });
+
+          if (seriesStateResponse.ok) {
+            hasSeriesState = true;
+            seriesWithStateCount++;
+          }
+        } catch (err: any) {
+          // Silently continue - series state check failed
+          console.warn(`Series state check failed for series ${seriesId}:`, err.message);
+        }
+
+        seriesEvidence.push({
+          seriesId,
+          hasFiles,
+          fileTypesAvailable,
+          hasSeriesState,
+        });
+      }
+
+      // Fail-safe: If series exist but no files/state available
+      if (seriesAfterTeamFilter > 0 && seriesWithFilesCount === 0 && seriesWithStateCount === 0) {
+        const noDataResponse: ScoutResponse = {
+          success: true,
+          source: "GRID",
+          code: "NO_IN_GAME_DATA",
+          data: {
+            teamName,
+            region: "Unknown",
+            lastUpdated: new Date().toISOString().split('T')[0],
+            sampleSize: 0,
+            dateRange: hours !== undefined
+              ? `${windowDir === "next" ? "Next" : "Past"} ${hours} hours`
+              : `Last ${daysBack} days`,
+            tendencies: [],
+            players: [],
+            compositions: [],
+            evidence: [
+              {
+                metric: "Series Found",
+                value: `${seriesAfterTeamFilter} series`,
+                sampleSize: `${seriesFetchedBeforeTeamFilter} before team filter`,
+              },
+              {
+                metric: "In-Game Data",
+                value: "None available",
+                sampleSize: "No files or state found for checked series",
+              },
+            ],
+          },
+        };
+
+        if (debug) {
+          noDataResponse.debug = {
+            totalSeriesFetched: seriesFetchedBeforeTeamFilter,
+            totalSeriesAfterFilter: seriesAfterTeamFilter,
+            teamIdUsed: teamId,
+            tournamentsSelected,
+            tournamentsTotalCount,
+            seriesFetchedBeforeTeamFilter,
+            seriesAfterTeamFilter,
+            sampleSeriesIds,
+            seriesWithFilesCount,
+            seriesWithStateCount,
+            evidence: seriesEvidence,
+            widenWindowAttempted,
+            timeWindow: { gte: originalGte, lte: originalLte },
+            timeWindowAfterWiden: widenWindowAttempted ? { gte, lte } : undefined,
+          };
+        }
+
+        return NextResponse.json(noDataResponse);
+      }
+
+      // Step 5: For each series, get file download list and download state-grid JSON
       const matchData: any[] = [];
 
       for (const seriesId of seriesIds) {
@@ -500,6 +622,9 @@ export async function POST(req: NextRequest) {
           seriesFetchedBeforeTeamFilter,
           seriesAfterTeamFilter,
           sampleSeriesIds,
+          seriesWithFilesCount,
+          seriesWithStateCount,
+          evidence: seriesEvidence,
           widenWindowAttempted,
           timeWindow: { gte: originalGte, lte: originalLte },
           timeWindowAfterWiden: widenWindowAttempted ? { gte, lte } : undefined,

@@ -55,6 +55,14 @@ export interface ScoutResponse {
     seriesFetchedBeforeTeamFilter?: number;
     seriesAfterTeamFilter?: number;
     sampleSeriesIds?: string[];
+    seriesWithFilesCount?: number;
+    seriesWithStateCount?: number;
+    evidence?: Array<{
+      seriesId: string;
+      hasFiles: boolean;
+      fileTypesAvailable: string[];
+      hasSeriesState: boolean;
+    }>;
     widenWindowAttempted?: boolean;
     timeWindow?: { gte: string; lte: string };
     timeWindowAfterWiden?: { gte: string; lte: string };
