@@ -11,7 +11,7 @@
     "test:ci": "vitest run",
     "verify:grid": "tsx scripts/verify-grid-routes.ts",
     "verify:grid:ps": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"npm run verify:grid\"",
-    "pick:grid:team": "tsx scripts/pick-team-from-series.ts",
+    "find:grid:evidence": "tsx scripts/find-series-with-evidence.ts",
     "prove:file-download": "tsx scripts/prove-file-download.ts",
     "probe:file-download:direct": "tsx scripts/probe-file-download-direct.ts",
     "grid:health": "node -e \"fetch('http://localhost:3000/api/grid/health').then(r=>r.json()).then(d=>console.log(JSON.stringify(d,null,2))).catch(e=>console.error('Error:',e.message))\"",

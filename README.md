@@ -271,8 +271,8 @@ The golden path validation sequence provides an end-to-end proof that:
 # Optional: Set TITLE_ID, TOURNAMENT_IDS, WINDOW_DIR, HOURS
 # Defaults: WINDOW_DIR="next", HOURS=336 (14 days)
 
-# 2) Pick a real team from a real series:
-npm run pick:grid:team
+# 2) Find a series with evidence (files or state):
+npm run find:grid:evidence
 
 # Output will show:
 # PICKED_SERIES_ID=...
@@ -289,9 +289,9 @@ $env:HOURS="17520"
 $env:TEAM_ID="<<PICKED_TEAM_ID>>"
 npm run verify:grid
 
-# 4) Prove File Download exists for at least one seriesId:
+# 4) Prove File Download exists for at least one seriesId (direct probe):
 $env:SERIES_ID="<<PICKED_SERIES_ID>>"
-npm run prove:file-download
+npm run probe:file-download:direct
 ```
 
 ### Validation Sequence (Bash)
@@ -301,8 +301,8 @@ npm run prove:file-download
 # Optional: Set TITLE_ID, TOURNAMENT_IDS, WINDOW_DIR, HOURS
 # Defaults: WINDOW_DIR="next", HOURS=336 (14 days)
 
-# 2) Pick a real team from a real series:
-npm run pick:grid:team
+# 2) Find a series with evidence (files or state):
+npm run find:grid:evidence
 
 # Output will show:
 # PICKED_SERIES_ID=...
@@ -367,7 +367,14 @@ $env:SERIES_ID="your-series-id-here"
 npm run probe:file-download:direct
 ```
 
-#### Manual PowerShell probe:
+#### Manual PowerShell probe (Milestone F):
+
+```powershell
+$headers = @{ "x-api-key" = $env:GRID_API_KEY }
+Invoke-RestMethod -Headers $headers -Method Get "https://api.grid.gg/file-download/list/<SERIES_ID>"
+```
+
+Or using the full example:
 
 ```powershell
 $seriesId = "your-series-id-here"
@@ -388,25 +395,34 @@ Write-Host "Files found: $($files.Count)"
 - **HTTP 403**: Entitlement/scope issue - your API key doesn't have access to file downloads for this series
 - **HTTP 401**: Authentication failed - check your GRID_API_KEY
 
-**Exit Codes (npm script):**
-- `0`: HTTP 200 (even if empty array)
+**Exit Codes (npm script - Milestone F):**
+- `0`: HTTP 200 and files.length > 0 (success)
+- `1`: HTTP 200 but files.length = 0 (no files available)
 - `2`: HTTP 403 (FORBIDDEN)
 - `3`: HTTP 401 (UNAUTHORIZED)
 - `4`: Other error
 
 **Note:** Do not include API keys or secrets in documentation or commit them to version control.
 
-### Strict Mode Enhancements
+### Milestone E: Strict Mode Enhancements
 
 When `STRICT=1` is set in `verify:grid`:
-- `MIN_SERIES` defaults to `1` if not explicitly set
-- `MIN_EVIDENCE` defaults to `1` if not explicitly set
+- `MIN_SERIES` defaults to `1` if not explicitly set (requires >= 1 after team filtering)
+- `MIN_EVIDENCE` defaults to `1` if not explicitly set (requires >= 1 files+state counts)
 - Fails (exit 1) if `seriesFetchedBeforeTeamFilter < MIN_SERIES`
 - Fails (exit 1) if `seriesAfterTeamFilter < MIN_SERIES`
-- Fails (exit 1) if `(seriesWithFilesCount + seriesWithStateCount) < MIN_EVIDENCE`
+- Fails (exit 1) if `(seriesWithFilesCount + seriesWithStateCount) < MIN_EVIDENCE` (and if 0, exit code 1)
+- Fails (exit 1) if any evidence check returns 401/403/404 repeatedly with clear message: "likely entitlement/scope or wrong endpoint"
 - Prints debug counters: `seriesFetchedBeforeTeamFilter`, `seriesAfterTeamFilter`, `seriesWithFilesCount`, `seriesWithStateCount`, `totalEvidenceCount`, `MIN_EVIDENCE threshold`, `sampleSeriesIds`
+- Prints: `fileDownloadHttpStatus`, `seriesStateUrl`, `seriesStateHttpStatus`
 
 **Note:** The `MIN_EVIDENCE` check ensures that series not only exist, but also have in-game data (files or state) available. This prevents false positives where series exist in Central Data but have no associated file downloads or series state.
+
+### Milestone E: Updated Golden Path Steps
+
+1. **find-series-with-evidence**: Run `npm run find:grid:evidence` to scan up to 50 series and pick a series with hasFiles||hasState
+2. **verify:grid in STRICT mode**: Run `npm run verify:grid` with `STRICT=1` using the picked IDs from step 1
+3. **prove direct file download**: Run `npm run probe:file-download:direct` with the picked SERIES_ID to validate key entitlements
 
 ## License
 

@@ -3,7 +3,7 @@ import { ScoutResponse, TeamReport, Tendency, Player, Champion, Composition, Evi
 import { safeJson } from "@/lib/http";
 import { toIsoUtcString, ensureIso8601WithTimezone } from "@/lib/datetime";
 import { getDefaultTournamentIds } from "@/lib/hackathon-tournaments";
-import { getSeriesStateGraphqlUrl, getSeriesStateTier, getSeriesStateUrlHost } from "@/lib/grid-endpoints";
+import { getSeriesStateGraphqlUrls, getSeriesStateTier, getSeriesStateUrlHost, getSeriesStateMode } from "@/lib/grid-endpoints";
 
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 const GRID_FILE_DOWNLOAD_BASE = "https://api.grid.gg/file-download";
@@ -502,6 +502,11 @@ export async function POST(req: NextRequest) {
 
       let seriesWithFilesCount = 0;
       let seriesWithStateCount = 0;
+      
+      // Milestone D: Track attempted URLs and HTTP statuses for debug output
+      const seriesStateAttemptedUrls: string[] = [];
+      const seriesStateHttpStatusByUrl: Record<string, number> = {};
+      let fileDownloadHttpStatus: number | undefined;
 
       for (const seriesId of seriesToCheck) {
         let hasFiles = false;
@@ -518,6 +523,9 @@ export async function POST(req: NextRequest) {
             signal: controller.signal,
           });
 
+          // Milestone D: Track file download HTTP status
+          fileDownloadHttpStatus = fileListResponse.status;
+
           if (fileListResponse.ok) {
             const fileList = await safeJson(fileListResponse, `file_list_${seriesId}`);
             if (Array.isArray(fileList) && fileList.length > 0) {
@@ -531,46 +539,78 @@ export async function POST(req: NextRequest) {
           console.warn(`File list check failed for series ${seriesId}:`, err.message);
         }
 
-        // Check series state using the correct Live Data Feed GraphQL endpoint
+        // Milestone D: Check series state with endpoint toggle and explicit 401/403/404 logging
         try {
+          // Milestone C: Per hackathon doc, use seriesState(id: "...") not seriesState(seriesId: "...")
           const seriesStateQuery = `
-            query GetSeriesState($seriesId: ID!) {
-              seriesState(seriesId: $seriesId) {
-                seriesId
-                state
-                timestamp
+            query GetSeriesState($id: ID!) {
+              seriesState(id: $id) {
+                id
+                started
+                finished
               }
             }
           `;
 
-          const seriesStateUrl = getSeriesStateGraphqlUrl();
-          const seriesStateResponse = await fetch(seriesStateUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-api-key": GRID_API_KEY,
-            },
-            body: JSON.stringify({
-              query: seriesStateQuery,
-              variables: { seriesId },
-            }),
-            signal: controller.signal,
-          });
+          const seriesStateUrls = getSeriesStateGraphqlUrls();
+          const seriesStateMode = getSeriesStateMode();
+          let seriesStateSuccess = false;
+          let lastStatus = 0;
 
-          // Logging/telemetry: Always include tier, host, and HTTP status in debug output
-          const seriesStateTier = getSeriesStateTier();
-          const seriesStateUrlHost = getSeriesStateUrlHost();
-          const seriesStateHttpStatus = seriesStateResponse.status;
-          if (debug) {
-            console.log(`Series State check for ${seriesId}: tier=${seriesStateTier}, host=${seriesStateUrlHost}, httpStatus=${seriesStateHttpStatus}`);
+          for (const seriesStateUrl of seriesStateUrls) {
+            // Track attempted URL
+            if (!seriesStateAttemptedUrls.includes(seriesStateUrl)) {
+              seriesStateAttemptedUrls.push(seriesStateUrl);
+            }
+
+            const seriesStateResponse = await fetch(seriesStateUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key": GRID_API_KEY,
+              },
+              body: JSON.stringify({
+                query: seriesStateQuery,
+                variables: { id: seriesId },
+              }),
+              signal: controller.signal,
+            });
+
+            const httpStatus = seriesStateResponse.status;
+            lastStatus = httpStatus;
+            seriesStateHttpStatusByUrl[seriesStateUrl] = httpStatus;
+
+            // Milestone D: Explicit logging for 401/403/404
+            if (httpStatus === 401) {
+              console.warn(`Series State 401 (Unauthorized) for ${seriesId} at ${seriesStateUrl}`);
+            } else if (httpStatus === 403) {
+              console.warn(`Series State 403 (Forbidden) for ${seriesId} at ${seriesStateUrl}`);
+            } else if (httpStatus === 404) {
+              console.warn(`Series State 404 (Not Found) for ${seriesId} at ${seriesStateUrl}`);
+            }
+
+            if (seriesStateResponse.ok) {
+              const seriesStateData = await safeJson(seriesStateResponse, `series_state_${seriesId}`);
+              // Check for GraphQL errors
+              if (!seriesStateData.errors && seriesStateData.data?.seriesState) {
+                hasSeriesState = true;
+                seriesWithStateCount++;
+                seriesStateSuccess = true;
+                break; // Success, stop trying other URLs
+              }
+            } else if (seriesStateMode === "auto" && (httpStatus === 403 || httpStatus === 404)) {
+              // In auto mode, if we get 403/404, try next URL (if available)
+              console.log(`Series State ${httpStatus} at ${seriesStateUrl}, trying next URL...`);
+              continue; // Try next URL
+            } else {
+              // In op or commercial mode, or non-403/404 error, stop trying
+              break;
+            }
           }
 
-          if (seriesStateResponse.ok) {
-            const seriesStateData = await safeJson(seriesStateResponse, `series_state_${seriesId}`);
-            // Check for GraphQL errors
-            if (!seriesStateData.errors && seriesStateData.data?.seriesState) {
-              hasSeriesState = true;
-              seriesWithStateCount++;
+          if (!seriesStateSuccess && lastStatus > 0) {
+            if (debug) {
+              console.log(`Series State check for ${seriesId}: all URLs failed, last status=${lastStatus}`);
             }
           }
         } catch (err: any) {
@@ -637,6 +677,10 @@ export async function POST(req: NextRequest) {
             timeWindowAfterWiden: widenWindowAttempted ? { gte, lte } : undefined,
             seriesStateTier: getSeriesStateTier(),
             seriesStateUrlHost: getSeriesStateUrlHost(),
+            // Milestone D: Add structured debug fields
+            seriesStateAttemptedUrls,
+            seriesStateHttpStatusByUrl,
+            fileDownloadHttpStatus,
           };
         }
 
@@ -733,6 +777,10 @@ export async function POST(req: NextRequest) {
           timeWindowAfterWiden: widenWindowAttempted ? { gte, lte } : undefined,
           seriesStateTier: getSeriesStateTier(),
           seriesStateUrlHost: getSeriesStateUrlHost(),
+          // Milestone D: Add structured debug fields
+          seriesStateAttemptedUrls,
+          seriesStateHttpStatusByUrl,
+          fileDownloadHttpStatus,
           seriesEdges: sortedSeriesEdges.map((edge: any) => ({
             node: {
               id: edge.node.id,

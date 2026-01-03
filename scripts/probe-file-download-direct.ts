@@ -70,8 +70,14 @@ async function main(): Promise<void> {
         console.log('   This means the series exists in Central Data but has no associated file downloads.');
       }
 
-      // Exit code 0 for HTTP 200 (even if empty)
-      process.exit(0);
+      // Milestone F: Exit 0 only if HTTP 200 and files.length > 0; otherwise exit 1
+      if (files.length > 0) {
+        console.log('\n✅ Success: Files found');
+        process.exit(0);
+      } else {
+        console.log('\n❌ No files available');
+        process.exit(1);
+      }
     } else if (response.status === 403) {
       console.error('\n❌ HTTP 403: FORBIDDEN');
       console.error('   This indicates an entitlement/scope issue.');

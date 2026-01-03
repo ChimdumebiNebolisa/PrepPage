@@ -1,20 +1,17 @@
 #!/usr/bin/env node
 /**
- * Picks a real teamId from a real series in Central Data that has evidence (files or state).
+ * Milestone C: Find a series with evidence (files or state) from hackathon whitelist.
  *
- * This script fetches series from GRID Central Data (without team filtering),
+ * This script scans series from Central Data using the hackathon tournament whitelist,
  * checks each series for File Download files or Series State evidence,
- * picks the first series that has evidence and teams, and outputs a teamId from that series.
- * This ensures we're using actual teams that appear in real series with in-game data available.
+ * and stops on the FIRST series where hasFiles || hasState.
  *
  * Environment variables:
- * - BASE_URL (default: http://localhost:3000) - Not used, calls GRID directly
  * - TITLE_ID (optional): Title ID for filtering
- * - TOURNAMENT_IDS (optional): Comma-separated tournament IDs
+ * - TOURNAMENT_IDS (optional): Comma-separated tournament IDs (defaults to hackathon whitelist)
  * - WINDOW_DIR (optional, default: "past"): Time window direction - "past" or "next"
  * - HOURS (optional, default: 17520): Hours for time window (17520 = ~2 years, aligned with hackathon scope)
  * - MAX_SERIES_TO_CHECK (optional, default: 50): Maximum number of series to check for evidence
- * - STRICT (optional): If "1", exit non-zero if no evidence found
  */
 
 import { loadEnvConfig } from "@next/env";
@@ -32,7 +29,6 @@ const TOURNAMENT_IDS_SOURCE = TOURNAMENT_IDS_ENV.length > 0 ? 'env override' : '
 const WINDOW_DIR = process.env.WINDOW_DIR || 'past';
 const HOURS = parseInt(process.env.HOURS || '17520', 10);
 const MAX_SERIES_TO_CHECK = parseInt(process.env.MAX_SERIES_TO_CHECK || '50', 10);
-const STRICT = process.env.STRICT === '1';
 const GRID_FILE_DOWNLOAD_BASE = "https://api.grid.gg/file-download";
 
 if (!GRID_API_KEY || GRID_API_KEY === "YOUR_GRID_API_KEY") {
@@ -272,16 +268,18 @@ async function checkFileDownload(seriesId: string): Promise<{ hasFiles: boolean;
 
 async function checkSeriesState(seriesId: string): Promise<{ hasState: boolean; status: number }> {
   try {
+    // Milestone C: Per hackathon doc, use seriesState(id: "...") not seriesState(seriesId: "...")
     const query = `
-      query GetSeriesState($seriesId: ID!) {
-        seriesState(seriesId: $seriesId) {
-          seriesId
-          state
-          timestamp
+      query GetSeriesState($id: ID!) {
+        seriesState(id: $id) {
+          id
+          started
+          finished
         }
       }
     `;
 
+    // Milestone C: Per hackathon doc, endpoint is https://api-op.grid.gg/live-data-feed/series-state/graphql
     const seriesStateUrl = getSeriesStateGraphqlUrl();
     const response = await fetch(seriesStateUrl, {
       method: 'POST',
@@ -291,7 +289,7 @@ async function checkSeriesState(seriesId: string): Promise<{ hasState: boolean; 
       },
       body: JSON.stringify({
         query,
-        variables: { seriesId },
+        variables: { id: seriesId },
       }),
     });
 
@@ -309,7 +307,7 @@ async function checkSeriesState(seriesId: string): Promise<{ hasState: boolean; 
 }
 
 async function main(): Promise<void> {
-  console.log('🔍 Picking team from series with evidence (files or state)...\n');
+  console.log('🔍 Finding series with evidence (files or state) from hackathon whitelist...\n');
   console.log(`Window: ${WINDOW_DIR} (${HOURS} hours)`);
   console.log(`Time range: ${gte} to ${lte}`);
   if (TITLE_ID) console.log(`Title ID: ${TITLE_ID}`);
@@ -384,41 +382,43 @@ async function main(): Promise<void> {
       }
     }
 
+    // Milestone C: Print summary of how many series were checked and HTTP statuses
+    console.log(`\n📊 Summary:`);
+    console.log(`  Series checked: ${checkedCount}`);
+    console.log(`  Series with files: ${seriesWithFilesCount}`);
+    console.log(`  Series with state: ${seriesWithStateCount}`);
+    
+    // File Download status summary
+    const fileDownload401 = fileDownloadStatusCounts[401] || 0;
+    const fileDownload403 = fileDownloadStatusCounts[403] || 0;
+    const fileDownload404 = fileDownloadStatusCounts[404] || 0;
+    const fileDownload200Empty = (fileDownloadStatusCounts[200] || 0) - seriesWithFilesCount;
+    const fileDownload200Files = seriesWithFilesCount;
+    const fileDownloadOther = Object.entries(fileDownloadStatusCounts)
+      .filter(([status]) => !['200', '401', '403', '404'].includes(status))
+      .reduce((sum, [, count]) => sum + count, 0);
+    console.log(`  File Download statuses: 401=${fileDownload401}, 403=${fileDownload403}, 404=${fileDownload404}, 200-empty=${fileDownload200Empty}, 200-files=${fileDownload200Files}, other=${fileDownloadOther}`);
+
+    // Series State status summary
+    const seriesState401 = seriesStateStatusCounts[401] || 0;
+    const seriesState403 = seriesStateStatusCounts[403] || 0;
+    const seriesState404 = seriesStateStatusCounts[404] || 0;
+    const seriesState200NoState = (seriesStateStatusCounts[200] || 0) - seriesWithStateCount;
+    const seriesState200HasState = seriesWithStateCount;
+    const seriesStateOther = Object.entries(seriesStateStatusCounts)
+      .filter(([status]) => !['200', '401', '403', '404'].includes(status))
+      .reduce((sum, [, count]) => sum + count, 0);
+    console.log(`  Series State statuses: 401=${seriesState401}, 403=${seriesState403}, 404=${seriesState404}, 200-noState=${seriesState200NoState}, 200-hasState=${seriesState200HasState}, other=${seriesStateOther}`);
+
     if (!selectedSeries) {
-      // No evidence found - print distribution summary
-      console.error('❌ ERROR: No series found with evidence (files or state)');
-      console.error('\nDistribution summary:');
-
-      // File Download distribution
-      const fileDownload403 = fileDownloadStatusCounts[403] || 0;
-      const fileDownload200Empty = (fileDownloadStatusCounts[200] || 0) - seriesWithFilesCount;
-      const fileDownload200Files = seriesWithFilesCount;
-      const fileDownloadOther = Object.entries(fileDownloadStatusCounts)
-        .filter(([status]) => status !== '200' && status !== '403')
-        .reduce((sum, [, count]) => sum + count, 0);
-      console.error(`  fileDownload: { http403: ${fileDownload403}, http200Empty: ${fileDownload200Empty}, http200Files: ${fileDownload200Files}, other: ${fileDownloadOther} }`);
-
-      // Series State distribution
-      const seriesState403 = seriesStateStatusCounts[403] || 0;
-      const seriesState200NoState = (seriesStateStatusCounts[200] || 0) - seriesWithStateCount;
-      const seriesState200HasState = seriesWithStateCount;
-      const seriesStateOther = Object.entries(seriesStateStatusCounts)
-        .filter(([status]) => status !== '200' && status !== '403')
-        .reduce((sum, [, count]) => sum + count, 0);
-      console.error(`  seriesState: { http403: ${seriesState403}, http200NoState: ${seriesState200NoState}, http200HasState: ${seriesState200HasState}, other: ${seriesStateOther} }`);
-
+      // No evidence found - print diagnostic summary
+      console.error('\n❌ ERROR: No series found with evidence (files or state)');
       console.error('\n  Suggestions:');
       console.error(`   - Increase HOURS (current: ${HOURS})`);
       console.error(`   - Change WINDOW_DIR (current: ${WINDOW_DIR})`);
       console.error('   - Try specifying TITLE_ID or TOURNAMENT_IDS');
       console.error('   - Verify API key has access to file-download and series-state endpoints');
-
-      if (STRICT) {
-        process.exit(1);
-      } else {
-        console.error('\n⚠️  Exiting with status 0 (STRICT mode not enabled)');
-        process.exit(0);
-      }
+      process.exit(1);
     }
 
     const teams = selectedSeries.teams || [];

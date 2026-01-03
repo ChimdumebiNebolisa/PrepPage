@@ -258,13 +258,28 @@ async function main(): Promise<void> {
 
   if (data.debug) {
     console.log('\n📊 Debug Counters:');
-    console.log(`  seriesFetchedBeforeTeamFilter: ${data.debug.seriesFetchedBeforeTeamFilter ?? data.debug.totalSeriesFetched ?? 'unknown'}`);
-    console.log(`  seriesAfterTeamFilter: ${data.debug.seriesAfterTeamFilter ?? data.debug.totalSeriesAfterFilter ?? 'unknown'}`);
+    const seriesFetchedBeforeTeamFilter = data.debug.seriesFetchedBeforeTeamFilter ?? data.debug.totalSeriesFetched ?? 0;
+    const seriesAfterTeamFilter = data.debug.seriesAfterTeamFilter ?? data.debug.totalSeriesAfterFilter ?? 0;
+    console.log(`  seriesFetchedBeforeTeamFilter: ${seriesFetchedBeforeTeamFilter}`);
+    console.log(`  seriesAfterTeamFilter: ${seriesAfterTeamFilter}`);
     console.log(`  seriesWithFilesCount: ${seriesWithFilesCount}`);
     console.log(`  seriesWithStateCount: ${seriesWithStateCount}`);
     console.log(`  totalEvidenceCount: ${totalEvidenceCount}`);
 
-    // Print Series State tier and endpoint host
+    // Milestone E: Print file download HTTP status
+    if (data.debug.fileDownloadHttpStatus !== undefined) {
+      console.log(`  fileDownloadHttpStatus: ${data.debug.fileDownloadHttpStatus}`);
+    }
+
+    // Milestone E: Print Series State URL and status
+    if (data.debug.seriesStateAttemptedUrls && Array.isArray(data.debug.seriesStateAttemptedUrls) && data.debug.seriesStateAttemptedUrls.length > 0) {
+      const firstUrl = data.debug.seriesStateAttemptedUrls[0];
+      const status = data.debug.seriesStateHttpStatusByUrl?.[firstUrl];
+      console.log(`  seriesStateUrl: ${firstUrl}`);
+      console.log(`  seriesStateHttpStatus: ${status ?? 'unknown'}`);
+    }
+
+    // Print Series State tier and endpoint host (legacy)
     if (data.debug.seriesStateTier) {
       console.log(`  seriesStateTier: ${data.debug.seriesStateTier}`);
     }
@@ -278,9 +293,29 @@ async function main(): Promise<void> {
     if (data.debug.sampleSeriesIds && Array.isArray(data.debug.sampleSeriesIds)) {
       console.log(`  sampleSeriesIds (first 5): ${data.debug.sampleSeriesIds.slice(0, 5).join(', ')}`);
     }
+
+    // Milestone E: Check for repeated 401/403/404 errors in evidence checks
+    if (STRICT && data.debug.seriesStateHttpStatusByUrl) {
+      const authErrors: string[] = [];
+      for (const [url, status] of Object.entries(data.debug.seriesStateHttpStatusByUrl)) {
+        if (status === 401 || status === 403 || status === 404) {
+          authErrors.push(`${url}: ${status}`);
+        }
+      }
+      if (data.debug.fileDownloadHttpStatus && (data.debug.fileDownloadHttpStatus === 401 || data.debug.fileDownloadHttpStatus === 403 || data.debug.fileDownloadHttpStatus === 404)) {
+        authErrors.push(`fileDownload: ${data.debug.fileDownloadHttpStatus}`);
+      }
+      if (authErrors.length > 0) {
+        console.error(`\n❌ CHECK FAILED: Evidence checks returned auth/notfound errors`);
+        console.error(`   Likely entitlement/scope or wrong endpoint`);
+        console.error(`   Errors: ${authErrors.join(', ')}`);
+        process.exit(1);
+      }
+    }
   }
 
-  // Check MIN_SERIES requirement (if STRICT or MIN_SERIES explicitly set)
+  // Milestone E: Check MIN_SERIES requirement (if STRICT or MIN_SERIES explicitly set)
+  // In STRICT mode, require MIN_SERIES >= 1 after team filtering
   if (MIN_SERIES > 0) {
     const seriesFetchedBeforeTeamFilter = data.debug?.seriesFetchedBeforeTeamFilter ?? data.debug?.totalSeriesFetched ?? 0;
     const seriesAfterFilter = data.debug?.seriesAfterTeamFilter ?? data.debug?.totalSeriesAfterFilter ?? 0;
@@ -320,7 +355,8 @@ async function main(): Promise<void> {
     log(`  - seriesAfterTeamFilter: ${seriesAfterFilter}`);
   }
 
-  // Check MIN_EVIDENCE requirement (if STRICT or MIN_EVIDENCE explicitly set)
+  // Milestone E: Check MIN_EVIDENCE requirement (if STRICT or MIN_EVIDENCE explicitly set)
+  // In STRICT mode, require MIN_EVIDENCE >= 1 (files+state counts) and exit code 1 if 0
   if (MIN_EVIDENCE > 0) {
     if (totalEvidenceCount < MIN_EVIDENCE) {
       console.error(`\n❌ CHECK FAILED: SCOUT`);
@@ -328,6 +364,9 @@ async function main(): Promise<void> {
       console.error(`   seriesWithFilesCount: ${seriesWithFilesCount}`);
       console.error(`   seriesWithStateCount: ${seriesWithStateCount}`);
       console.error(`   Note: Series exist but in-game data (files/state) is missing`);
+      if (STRICT && totalEvidenceCount === 0) {
+        console.error(`   STRICT mode: Evidence count is 0, failing`);
+      }
       console.error(`   Suggestions:`);
       console.error(`   - Verify API key has access to file-download and series-state endpoints`);
       console.error(`   - Try a different team/tournament that has in-game data available`);
