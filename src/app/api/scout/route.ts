@@ -144,7 +144,7 @@ export async function POST(req: NextRequest) {
 
         const gteIso = ensureIso8601WithTimezone(gte);
         const lteIso = ensureIso8601WithTimezone(lte);
-        
+
         // Milestone B: Support multiple tournament IDs in the 'in' array
         // Per Quickstart: filter: { tournament: { id: { in: <ID> }, includeChildren: { equals: true } } }
         const seriesQuery = `
@@ -196,7 +196,7 @@ export async function POST(req: NextRequest) {
             lte: lteIso,
             first: Math.min(pageSize, maxToFetch - allEdges.length),
           };
-          
+
           if (cursor) {
             variables.after = cursor;
           }
@@ -221,7 +221,7 @@ export async function POST(req: NextRequest) {
 
           const edges = seriesData.data?.allSeries?.edges || [];
           allEdges.push(...edges);
-          
+
           const pageInfo = seriesData.data?.allSeries?.pageInfo;
           hasNextPage = pageInfo?.hasNextPage || false;
           cursor = pageInfo?.endCursor || null;
@@ -238,7 +238,7 @@ export async function POST(req: NextRequest) {
       // Step 2a: Determine tournament IDs to use
       // Milestone A: Default to hackathon whitelist unless ALLOW_CUSTOM_TOURNAMENTS=1
       const ALLOW_CUSTOM_TOURNAMENTS = process.env.ALLOW_CUSTOM_TOURNAMENTS === '1';
-      
+
       if (tournamentIds && tournamentIds.length > 0 && ALLOW_CUSTOM_TOURNAMENTS) {
         // Custom tournaments allowed via env flag
         tournamentsSelected = tournamentIds;
@@ -285,11 +285,11 @@ export async function POST(req: NextRequest) {
         tournamentsTotalCount = tournamentsData.data?.tournaments?.totalCount || 0;
         const tournamentEdges = tournamentsData.data?.tournaments?.edges || [];
         const allTitleTournaments = tournamentEdges.map((edge: any) => edge.node.id);
-        
+
         // Filter to whitelist subset for the chosen title
         const whitelist = getDefaultTournamentIds();
         tournamentsSelected = allTitleTournaments.filter((id: string) => whitelist.includes(id));
-        
+
         if (tournamentsSelected.length === 0) {
           // If no whitelist tournaments match, fall back to full whitelist
           tournamentsSelected = whitelist;
@@ -502,7 +502,7 @@ export async function POST(req: NextRequest) {
 
       let seriesWithFilesCount = 0;
       let seriesWithStateCount = 0;
-      
+
       // Milestone D: Track attempted URLs and HTTP statuses for debug output
       const seriesStateAttemptedUrls: string[] = [];
       const seriesStateHttpStatusByUrl: Record<string, number> = {};

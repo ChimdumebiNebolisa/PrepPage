@@ -29,6 +29,7 @@ const TOURNAMENT_IDS_SOURCE = TOURNAMENT_IDS_ENV.length > 0 ? 'env override' : '
 const WINDOW_DIR = process.env.WINDOW_DIR || 'past';
 const HOURS = parseInt(process.env.HOURS || '17520', 10);
 const MAX_SERIES_TO_CHECK = parseInt(process.env.MAX_SERIES_TO_CHECK || '50', 10);
+const STRICT = process.env.STRICT === '1';
 const GRID_FILE_DOWNLOAD_BASE = "https://api.grid.gg/file-download";
 
 if (!GRID_API_KEY || GRID_API_KEY === "YOUR_GRID_API_KEY") {

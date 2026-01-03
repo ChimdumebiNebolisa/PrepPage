@@ -60,10 +60,10 @@ export async function GET(req: NextRequest) {
     }
 
     const allTournaments = data.data?.tournaments?.edges?.map((edge: any) => edge.node) || [];
-    
+
     // Milestone A: Filter to whitelist subset for the chosen title
     const whitelist = getDefaultTournamentIds();
-    const tournaments = allTournaments.filter((tournament: any) => 
+    const tournaments = allTournaments.filter((tournament: any) =>
       whitelist.includes(tournament.id)
     );
 
