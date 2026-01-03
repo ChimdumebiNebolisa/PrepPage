@@ -5,6 +5,7 @@ import { toIsoUtcString, ensureIso8601WithTimezone } from "@/lib/datetime";
 
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 const GRID_FILE_DOWNLOAD_BASE = "https://api.grid.gg/file-download";
+const GRID_SERIES_STATE_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/live-data-feed/series-state/graphql";
 
 export const runtime = "nodejs";
 
@@ -460,19 +461,38 @@ export async function POST(req: NextRequest) {
           console.warn(`File list check failed for series ${seriesId}:`, err.message);
         }
 
-        // Check series state
+        // Check series state using the correct Live Data Feed GraphQL endpoint
         try {
-          const seriesStateResponse = await fetch(`https://api.grid.gg/series-state/${seriesId}`, {
-            method: "GET",
+          const seriesStateQuery = `
+            query GetSeriesState($seriesId: ID!) {
+              seriesState(seriesId: $seriesId) {
+                seriesId
+                state
+                timestamp
+              }
+            }
+          `;
+
+          const seriesStateResponse = await fetch(GRID_SERIES_STATE_GRAPHQL_ENDPOINT, {
+            method: "POST",
             headers: {
+              "Content-Type": "application/json",
               "x-api-key": GRID_API_KEY,
             },
+            body: JSON.stringify({
+              query: seriesStateQuery,
+              variables: { seriesId },
+            }),
             signal: controller.signal,
           });
 
           if (seriesStateResponse.ok) {
-            hasSeriesState = true;
-            seriesWithStateCount++;
+            const seriesStateData = await safeJson(seriesStateResponse, `series_state_${seriesId}`);
+            // Check for GraphQL errors
+            if (!seriesStateData.errors && seriesStateData.data?.seriesState) {
+              hasSeriesState = true;
+              seriesWithStateCount++;
+            }
           }
         } catch (err: any) {
           // Silently continue - series state check failed
