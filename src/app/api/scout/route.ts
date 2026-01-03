@@ -7,9 +7,23 @@ const GRID_FILE_DOWNLOAD_BASE = "https://api.grid.gg/file-download";
 
 export const runtime = "nodejs";
 
+/**
+ * Filters series edges to only include those where the team is present.
+ * Client-side filtering since SeriesFilter does NOT support filtering by teams.
+ */
+export function filterSeriesByTeam(seriesEdges: any[], teamId: string): any[] {
+  return seriesEdges.filter((edge) => {
+    const teams = edge.node?.teams || [];
+    return teams.some((team: any) => {
+      const teamIdToCheck = team?.baseInfo?.id || team?.id;
+      return String(teamIdToCheck) === String(teamId);
+    });
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { teamId, game = "lol", daysBack = 30, maxSeries = 8 } = await req.json();
+    const { teamId, game = "lol", daysBack = 30, maxSeries = 8, titleId, useHackathonNarrowing = false } = await req.json();
 
     if (!teamId) {
       return NextResponse.json(
@@ -28,35 +42,135 @@ export async function POST(req: NextRequest) {
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout for full pipeline
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for full pipeline
 
     try {
-      // Step 1: Find recent series for the team
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - daysBack);
-      const cutoffDateStr = cutoffDate.toISOString().split('T')[0];
-
-      const seriesQuery = `
-        query GetTeamSeries($teamId: ID!, $game: String!, $first: Int!, $after: String) {
+      // Step 1: Get team info
+      const teamQuery = `
+        query GetTeam($teamId: ID!) {
           team(id: $teamId) {
             id
             name
-            series(filter: { game: { eq: $game }, startDate: { gte: "${cutoffDateStr}" } }, first: $first, after: $after) {
-              edges {
-                node {
-                  id
-                  startDate
-                  endDate
-                }
-              }
-              pageInfo {
-                hasNextPage
-                endCursor
-              }
-            }
           }
         }
       `;
+
+      const teamResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": GRID_API_KEY,
+        },
+        body: JSON.stringify({
+          query: teamQuery,
+          variables: { teamId },
+        }),
+        signal: controller.signal,
+      });
+
+      const teamData = await safeJson(teamResponse, "team_query");
+
+      if (teamData.errors) {
+        throw new Error(teamData.errors.map((e: any) => e.message).join(", "));
+      }
+
+      const team = teamData.data?.team;
+      if (!team) {
+        return NextResponse.json(
+          { success: false, code: "TEAM_NOT_FOUND" },
+          { status: 404 }
+        );
+      }
+
+      const teamName = team.name;
+
+      // Step 2: Find recent series
+      // Calculate time window using ISO 8601 format
+      const now = new Date();
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+      const gte = cutoffDate.toISOString();
+      const lte = now.toISOString();
+
+      let seriesEdges: any[] = [];
+
+      if (useHackathonNarrowing && titleId) {
+        // Hackathon narrowing: Titles -> Tournaments -> allSeries
+        // First, get tournaments for the title
+        const tournamentsQuery = `
+          query GetTournaments($titleId: String!) {
+            tournaments(filter: { title: { id: { in: [$titleId] } } }) {
+              totalCount
+            edges {
+              node {
+                id
+                  name
+                }
+              }
+            }
+          }
+        `;
+
+        const tournamentsResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": GRID_API_KEY,
+          },
+          body: JSON.stringify({
+            query: tournamentsQuery,
+            variables: { titleId },
+          }),
+          signal: controller.signal,
+        });
+
+        const tournamentsData = await safeJson(tournamentsResponse, "tournaments_query");
+
+        if (tournamentsData.errors) {
+          throw new Error(tournamentsData.errors.map((e: any) => e.message).join(", "));
+        }
+
+        const tournamentEdges = tournamentsData.data?.tournaments?.edges || [];
+        const tournamentIds = tournamentEdges.map((edge: any) => edge.node.id);
+
+        if (tournamentIds.length > 0) {
+          // Get series for tournaments with includeChildren: true
+          // Note: tournament filter uses a single ID, not an array, so we query each tournament separately
+          // or use the first tournament ID if multiple exist
+          const tournamentId = tournamentIds[0]; // Use first tournament for now
+          const seriesQuery = `
+            query GetSeriesByTournaments($tournamentId: ID!, $gte: DateTime!, $lte: DateTime!) {
+              allSeries(
+                filter: {
+                  tournament: { id: { in: [$tournamentId] }, includeChildren: { equals: true } }
+                  startTimeScheduled: { gte: $gte, lte: $lte }
+                }
+                orderBy: StartTimeScheduled
+              ) {
+                totalCount
+                edges {
+                  node {
+                    id
+                    startTimeScheduled
+                    teams {
+                      baseInfo {
+                        id
+                        name
+                      }
+                    }
+                    tournament {
+                      id
+                      name
+                    }
+                  }
+                }
+                pageInfo {
+                  endCursor
+                  hasNextPage
+                }
+              }
+            }
+          `;
 
       const seriesResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
         method: "POST",
@@ -64,14 +178,14 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json",
           "x-api-key": GRID_API_KEY,
         },
-        body: JSON.stringify({
-          query: seriesQuery,
-          variables: {
-            teamId,
-            game,
-            first: maxSeries,
-          },
-        }),
+            body: JSON.stringify({
+              query: seriesQuery,
+              variables: {
+                tournamentId,
+                gte,
+                lte,
+              },
+            }),
         signal: controller.signal,
       });
 
@@ -81,26 +195,107 @@ export async function POST(req: NextRequest) {
         throw new Error(seriesData.errors.map((e: any) => e.message).join(", "));
       }
 
-      const team = seriesData.data?.team;
-      if (!team) {
-        return NextResponse.json(
-          { success: false, code: "TEAM_NOT_FOUND" },
-          { status: 404 }
-        );
+          seriesEdges = seriesData.data?.allSeries?.edges || [];
+        }
+      } else {
+        // Standard approach: fetch series with time window + optional titleId
+        // Use documented fields: startTimeScheduled for date, titleId as optional filter
+        const filterParts: string[] = [];
+        if (titleId) {
+          filterParts.push(`titleId: $titleId`);
+        }
+        filterParts.push(`startTimeScheduled: { gte: $gte, lte: $lte }`);
+
+        // Build query with conditional titleId variable
+        const queryVars = titleId 
+          ? `$titleId: String!, $gte: DateTime!, $lte: DateTime!`
+          : `$gte: DateTime!, $lte: DateTime!`;
+        
+        const seriesQuery = `
+          query GetRecentSeries(${queryVars}) {
+            allSeries(
+              filter: {
+                ${filterParts.join(',\n                ')}
+              }
+              orderBy: StartTimeScheduled
+            ) {
+              totalCount
+              edges {
+                node {
+                  id
+                  startTimeScheduled
+                  teams {
+                    baseInfo {
+                      id
+                      name
+                    }
+                  }
+                  tournament {
+                    id
+                    name
+                  }
+                }
+              }
+              pageInfo {
+                endCursor
+                hasNextPage
+              }
+            }
+          }
+        `;
+
+        const variables: any = {
+          gte,
+          lte,
+        };
+        if (titleId) {
+          variables.titleId = titleId;
+        }
+
+        const seriesResponse = await fetch(GRID_GRAPHQL_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": GRID_API_KEY,
+          },
+          body: JSON.stringify({
+            query: seriesQuery,
+            variables,
+          }),
+          signal: controller.signal,
+        });
+
+        const seriesData = await safeJson(seriesResponse, "series_query");
+
+        if (seriesData.errors) {
+          throw new Error(seriesData.errors.map((e: any) => e.message).join(", "));
+        }
+
+        seriesEdges = seriesData.data?.allSeries?.edges || [];
       }
 
-      const seriesEdges = team.series?.edges || [];
-      if (seriesEdges.length === 0) {
+      // Step 3: Filter series by teamId client-side (since SeriesFilter doesn't support teams)
+      const filteredSeriesEdges = filterSeriesByTeam(seriesEdges, teamId);
+
+      if (filteredSeriesEdges.length === 0) {
         return NextResponse.json(
           { success: false, code: "NO_SERIES_FOUND" },
           { status: 404 }
         );
       }
 
-      const teamName = team.name;
-      const seriesIds = seriesEdges.map((edge: any) => edge.node.id).slice(0, maxSeries);
+      // Sort by startTimeScheduled descending and limit to maxSeries
+      const sortedSeriesEdges = filteredSeriesEdges
+        .sort((a, b) => {
+          const dateA = new Date(a.node.startTimeScheduled || 0).getTime();
+          const dateB = new Date(b.node.startTimeScheduled || 0).getTime();
+          return dateB - dateA; // Descending order
+        })
+        .slice(0, maxSeries);
 
-      // Step 2: For each series, get file download list and download state-grid JSON
+      const seriesIds = sortedSeriesEdges.map((edge: any) => edge.node.id);
+
+      // Step 4: For each series, get file download list and download state-grid JSON
       const matchData: any[] = [];
 
       for (const seriesId of seriesIds) {
@@ -159,8 +354,8 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Step 3: Compute deterministic stats from match data
-      const report = computeTeamReport(teamName, matchData, seriesEdges, daysBack);
+      // Step 5: Compute deterministic stats from match data
+      const report = computeTeamReport(teamName, matchData, sortedSeriesEdges, daysBack);
 
       clearTimeout(timeoutId);
 
@@ -173,6 +368,10 @@ export async function POST(req: NextRequest) {
     } catch (err: any) {
       clearTimeout(timeoutId);
 
+      // Log the error for debugging
+      console.error("Scout API Error:", err.message);
+      console.error("Error stack:", err.stack);
+
       if (err.name === "AbortError" || err.message === "AbortError") {
         return NextResponse.json(
           { success: false, code: "GRID_FETCH_FAILED", error: "Request timeout" },
@@ -180,7 +379,19 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Check if error is from safeJson (JSON parsing failure)
+      // Check if error is from safeJson (HTTP error or JSON parsing failure)
+      if (err.message?.includes("HTTP_")) {
+        const httpStatus = err.message.match(/HTTP_(\d+)/)?.[1];
+        return NextResponse.json(
+          {
+            success: false,
+            code: "GRID_FETCH_FAILED",
+            error: `GRID API returned HTTP ${httpStatus || 'error'}: ${err.message}`
+          },
+          { status: 502 }
+        );
+      }
+
       if (err.message?.includes("JSON_PARSE_FAILED") || err.message?.includes("EMPTY_BODY")) {
         return NextResponse.json(
           { success: false, code: "PARSE_FAILED", error: err.message.substring(0, 200) },
@@ -202,14 +413,14 @@ export async function POST(req: NextRequest) {
 }
 
 function computeTeamReport(teamName: string, matchData: any[], seriesEdges: any[], daysBack: number): TeamReport {
-  // Extract date range
+  // Extract date range using startTimeScheduled field
   const dates = seriesEdges
-    .map((edge: any) => edge.node.startDate)
+    .map((edge: any) => edge.node.startTimeScheduled)
     .filter(Boolean)
     .sort();
   const dateRange = dates.length > 0
     ? `${new Date(dates[0]).toLocaleDateString()} - ${new Date(dates[dates.length - 1]).toLocaleDateString()}`
-    : "Last 30 days";
+    : `Last ${daysBack} days`;
 
   const sampleSize = matchData.length;
 

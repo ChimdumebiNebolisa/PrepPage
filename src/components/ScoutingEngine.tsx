@@ -211,9 +211,9 @@ export default function ScoutingEngine({ onReportGenerated }: { onReportGenerate
       return;
     }
 
-    // Create timeout controller for 5 second timeout
+    // Create timeout controller for 30 second timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
 
     try {
       const response = await fetch("/api/scout", {

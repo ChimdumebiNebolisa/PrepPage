@@ -54,6 +54,56 @@ GRID_API_KEY=your_key_here
 - **UI**: Tailwind CSS only (no shadcn/ui, no anime.js, no external UI libraries)
 - **Demo Data**: `public/demo-data.json` (fetched via `fetch('/demo-data.json')`)
 
+## API Routes
+
+### `/api/grid/introspect`
+
+Introspects the GRID GraphQL schema to discover field names for `Series`, `SeriesFilter`, and `SeriesOrderBy` types. This endpoint is used internally by the scout query to ensure it uses the correct field names from the actual schema.
+
+**Important Notes:**
+- The endpoint makes **3 separate HTTP requests** to GRID's GraphQL API, each with exactly ONE `__type(name: "...")` query
+- This is required because GRID's GraphQL server enforces "good-faith introspection" restrictions (from graphql-java) that only allow ONE `__type` or `__schema` field per request
+- Results are cached in-memory for 10 minutes to avoid hitting introspection limits during development
+- The endpoint only queries whitelisted types (`Series`, `SeriesFilter`, `SeriesOrderBy`) to prevent schema exfiltration
+
+**Response Format:**
+```json
+{
+  "success": true,
+  "seriesType": {
+    "name": "Series",
+    "fields": [{"name": "id", "type": {...}}, ...]
+  },
+  "seriesFilter": {
+    "name": "SeriesFilter",
+    "inputFields": [{"name": "teams", "type": {...}}, ...]
+  },
+  "seriesOrderBy": {
+    "name": "SeriesOrderBy",
+    "enumValues": ["START_DATE", "END_DATE", ...]
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "success": false,
+  "code": "INTROSPECTION_FAILED",
+  "error": "GraphQL error for SeriesFilter: ...",
+  "details": {
+    "which": "SeriesFilter",
+    "httpStatus": 200
+  }
+}
+```
+
+**Testing:**
+```bash
+# Test introspection endpoint
+curl http://localhost:3000/api/grid/introspect
+```
+
 ## User Flow
 
 1. User types team name in search field (minimum 2 characters recommended)

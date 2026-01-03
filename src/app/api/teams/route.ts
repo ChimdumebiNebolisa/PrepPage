@@ -40,9 +40,10 @@ export async function GET(req: NextRequest) {
 
   try {
     // GraphQL query for teams containing the search term
+    // Use documented format: teams(filter: { name: { contains: $q } })
     const query = `
-      query TeamSearch($search: String!, $first: Int!) {
-        teams(filter: { name: { contains: $search } }, first: $first) {
+      query TeamSearch($q: String!, $first: Int!) {
+        teams(filter: { name: { contains: $q } }, first: $first) {
           edges {
             node {
               id
@@ -62,7 +63,7 @@ export async function GET(req: NextRequest) {
       body: JSON.stringify({
         query,
         variables: {
-          search: q,
+          q,
           first: limit,
         },
       }),
