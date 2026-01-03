@@ -15,6 +15,9 @@
  * - HOURS (optional, default: 336): Hours for time window
  */
 
+import { loadEnvConfig } from "@next/env";
+loadEnvConfig(process.cwd());
+
 const GRID_GRAPHQL_ENDPOINT = "https://api-op.grid.gg/central-data/graphql";
 const GRID_API_KEY = process.env.GRID_API_KEY;
 const TITLE_ID = process.env.TITLE_ID;
@@ -224,7 +227,7 @@ async function main(): Promise<void> {
 
     const teams = selectedSeries.teams || [];
     const firstTeam = teams.find((team: any) => team?.baseInfo?.id);
-    
+
     if (!firstTeam?.baseInfo) {
       console.error('❌ ERROR: Series has no valid team structure');
       process.exit(1);

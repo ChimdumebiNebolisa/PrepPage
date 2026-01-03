@@ -19,13 +19,8 @@ export async function GET(req: NextRequest) {
     const titlesQuery = `
       query GetTitles {
         titles {
-          edges {
-            node {
-              id
-              name
-            }
-          }
-          totalCount
+          id
+          name
         }
       }
     `;
@@ -47,13 +42,12 @@ export async function GET(req: NextRequest) {
       throw new Error(data.errors.map((e: any) => e.message).join(", "));
     }
 
-    const titles = data.data?.titles?.edges?.map((edge: any) => edge.node) || [];
+    const titles = data.data?.titles || [];
 
     return NextResponse.json({
       success: true,
       source: "GRID",
       titles,
-      totalCount: data.data?.titles?.totalCount || 0,
     });
   } catch (error: any) {
     console.error("Titles API Error:", error.message);

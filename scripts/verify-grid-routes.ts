@@ -18,6 +18,9 @@
  * - MIN_SERIES (optional): Minimum number of series required (default: 0, or 1 if STRICT=1)
  */
 
+import { loadEnvConfig } from "@next/env";
+loadEnvConfig(process.cwd());
+
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 const TEAM_Q = process.env.TEAM_Q;
 const TEAM_ID = process.env.TEAM_ID;
