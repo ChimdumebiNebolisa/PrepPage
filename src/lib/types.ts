@@ -50,6 +50,14 @@ export interface ScoutResponse {
     totalSeriesFetched?: number;
     totalSeriesAfterFilter?: number;
     teamIdUsed?: string;
+    tournamentsSelected?: string[];
+    tournamentsTotalCount?: number;
+    seriesFetchedBeforeTeamFilter?: number;
+    seriesAfterTeamFilter?: number;
+    sampleSeriesIds?: string[];
+    widenWindowAttempted?: boolean;
+    timeWindow?: { gte: string; lte: string };
+    timeWindowAfterWiden?: { gte: string; lte: string };
     seriesEdges?: Array<{
       node: {
         id: string;
