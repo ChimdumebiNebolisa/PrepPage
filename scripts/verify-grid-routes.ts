@@ -15,6 +15,7 @@
  * - GTE (optional): ISO datetime for start (overrides HOURS and WINDOW_DIR)
  * - LTE (optional): ISO datetime for end (overrides HOURS and WINDOW_DIR)
  * - STRICT (optional): If "1", treat NO_SERIES_FOUND as failure (default: soft failure)
+ * - MIN_SERIES (optional): Minimum number of series required (default: 0, or 1 if STRICT=1)
  */
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
@@ -27,6 +28,10 @@ const HOURS = parseInt(process.env.HOURS || '336', 10); // Default 14 days (336 
 const GTE = process.env.GTE;
 const LTE = process.env.LTE;
 const STRICT = process.env.STRICT === '1';
+// MIN_SERIES: default 0, or 1 if STRICT=1 and not explicitly set
+const MIN_SERIES = process.env.MIN_SERIES !== undefined
+  ? parseInt(process.env.MIN_SERIES, 10)
+  : (STRICT ? 1 : 0);
 
 interface Team {
   id: string;
@@ -231,6 +236,36 @@ async function main(): Promise<void> {
   }
 
   log(`Scout returned success with data for team: ${data.data.teamName || 'unknown'}`);
+
+  // Check MIN_SERIES requirement (if STRICT or MIN_SERIES explicitly set)
+  if (MIN_SERIES > 0) {
+    let seriesCount = 0;
+    
+    // Try to get count from debug info first (most accurate)
+    if (data.debug?.totalSeriesAfterFilter !== undefined) {
+      seriesCount = data.debug.totalSeriesAfterFilter;
+    } else if (data.debug?.seriesEdges !== undefined) {
+      seriesCount = data.debug.seriesEdges.length;
+    } else if (data.data?.sampleSize !== undefined) {
+      seriesCount = data.data.sampleSize;
+    }
+
+    if (seriesCount < MIN_SERIES) {
+      console.error(`\n❌ CHECK FAILED: SCOUT`);
+      console.error(`   Found ${seriesCount} series, but MIN_SERIES=${MIN_SERIES} is required`);
+      console.error(`   Suggestions:`);
+      console.error(`   - Increase HOURS (current: ${HOURS})`);
+      console.error(`   - Change WINDOW_DIR (current: ${WINDOW_DIR})`);
+      console.error(`   - Try a team with upcoming/past matches in the time window`);
+      console.error(`   - Use explicit GTE/LTE with known series dates`);
+      if (data.debug) {
+        console.error(`   Debug info: ${JSON.stringify(data.debug)}`);
+      }
+      process.exit(1);
+    }
+
+    log(`✓ Series count (${seriesCount}) meets MIN_SERIES requirement (${MIN_SERIES})`);
+  }
 
   // Validate client-side filtering worked
   if (data.debug?.seriesEdges) {
