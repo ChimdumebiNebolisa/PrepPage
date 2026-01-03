@@ -147,6 +147,97 @@ npm run build
 4. Verify "DEMO MODE" badge appears
 5. Verify report content is from demo data
 
+## Runtime Verification
+
+The project includes a verification script that tests the API routes against GRID Central Data to ensure they work correctly.
+
+### Running Verification
+
+**Prerequisites:**
+- Development server must be running (`npm run dev`)
+- `GRID_API_KEY` must be set in `.env.local`
+
+**Basic Usage (PowerShell):**
+```powershell
+$env:TEAM_Q="Cloud9"
+npm run verify:grid
+```
+
+**Basic Usage (Bash):**
+```bash
+TEAM_Q="Cloud9" npm run verify:grid
+```
+
+**Advanced Usage with Options:**
+```bash
+# With title ID and custom time window
+TEAM_Q="CS2-1" TITLE_ID="3" HOURS=48 npm run verify:grid
+
+# With explicit time range
+TEAM_Q="Cloud9" GTE="2024-01-01T00:00:00Z" LTE="2024-01-31T23:59:59Z" npm run verify:grid
+
+# Use specific team ID (skip team search)
+TEAM_ID="12345" npm run verify:grid
+```
+
+### Environment Variables
+
+- `BASE_URL` (default: `http://localhost:3000`) - API base URL
+- `TEAM_Q` (required unless `TEAM_ID` is set) - Team search query
+- `TEAM_ID` (optional) - Override to use specific team ID instead of searching
+- `TITLE_ID` (optional) - Title ID for filtering teams/series
+- `GAME` (optional, default: `lol`) - Game identifier
+- `HOURS` (optional, default: `72`) - Hours to look back for series
+- `GTE` (optional) - ISO datetime for start (overrides `HOURS`)
+- `LTE` (optional) - ISO datetime for end (overrides `HOURS`)
+
+### What It Validates
+
+1. **Team Search (`/api/teams`)**:
+   - Returns HTTP 200
+   - Response contains valid team array with `{ id, name }`
+   - At least one team is returned
+
+2. **Scout Endpoint (`/api/scout`)**:
+   - Returns HTTP 200 with valid report data
+   - Client-side filtering worked correctly
+   - Every returned series contains the requested teamId in `teams.baseInfo.id`
+
+### Debug Mode
+
+Add `debug=1` query parameter to API calls to get additional debugging information:
+
+```bash
+# Teams endpoint with debug
+curl "http://localhost:3000/api/teams?q=Cloud9&debug=1"
+
+# Scout endpoint with debug (in request body)
+curl -X POST http://localhost:3000/api/scout \
+  -H "Content-Type: application/json" \
+  -d '{"teamId":"123","debug":true}'
+```
+
+Debug responses include:
+- **Teams**: Query name, edge count, returned count
+- **Scout**: Total series fetched, series after filter, teamId used, series edges with team data
+
+### Troubleshooting
+
+**"No teams found"**
+- Check `TEAM_Q` matches actual team names in GRID
+- Try different search terms
+- Verify `GRID_API_KEY` is set correctly
+
+**"NO_SERIES_FOUND"**
+- Adjust `HOURS` or `GTE`/`LTE` to widen time window
+- Check if team has recent matches in the specified time range
+- Try different `TITLE_ID` if filtering by title
+
+**"Client-side filtering failed"**
+- This indicates a bug in the filtering logic
+- Check that series responses include `teams.baseInfo.id` structure
+- Verify the teamId format matches between search and scout endpoints
+
 ## License
 
 Licensed under [MIT](LICENSE).

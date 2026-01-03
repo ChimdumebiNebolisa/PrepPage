@@ -23,7 +23,7 @@ export function filterSeriesByTeam(seriesEdges: any[], teamId: string): any[] {
 
 export async function POST(req: NextRequest) {
   try {
-    const { teamId, game = "lol", daysBack = 30, maxSeries = 8, titleId, useHackathonNarrowing = false } = await req.json();
+    const { teamId, game = "lol", daysBack = 30, maxSeries = 8, titleId, useHackathonNarrowing = false, debug = false } = await req.json();
 
     if (!teamId) {
       return NextResponse.json(
@@ -207,10 +207,10 @@ export async function POST(req: NextRequest) {
         filterParts.push(`startTimeScheduled: { gte: $gte, lte: $lte }`);
 
         // Build query with conditional titleId variable
-        const queryVars = titleId 
+        const queryVars = titleId
           ? `$titleId: String!, $gte: DateTime!, $lte: DateTime!`
           : `$gte: DateTime!, $lte: DateTime!`;
-        
+
         const seriesQuery = `
           query GetRecentSeries(${queryVars}) {
             allSeries(
@@ -275,7 +275,9 @@ export async function POST(req: NextRequest) {
       }
 
       // Step 3: Filter series by teamId client-side (since SeriesFilter doesn't support teams)
+      const totalSeriesFetched = seriesEdges.length;
       const filteredSeriesEdges = filterSeriesByTeam(seriesEdges, teamId);
+      const totalSeriesAfterFilter = filteredSeriesEdges.length;
 
       if (filteredSeriesEdges.length === 0) {
         return NextResponse.json(
@@ -359,11 +361,28 @@ export async function POST(req: NextRequest) {
 
       clearTimeout(timeoutId);
 
-      return NextResponse.json({
+      const response: ScoutResponse = {
         success: true,
         source: "GRID",
         data: report,
-      } as ScoutResponse);
+      };
+
+      // Add debug info if requested
+      if (debug) {
+        response.debug = {
+          totalSeriesFetched,
+          totalSeriesAfterFilter,
+          teamIdUsed: teamId,
+          seriesEdges: sortedSeriesEdges.map((edge: any) => ({
+            node: {
+              id: edge.node.id,
+              teams: edge.node.teams || [],
+            },
+          })),
+        };
+      }
+
+      return NextResponse.json(response);
 
     } catch (err: any) {
       clearTimeout(timeoutId);

@@ -88,15 +88,25 @@ export async function GET(req: NextRequest) {
         }))
         .filter((team: any) => team.id && team.name) || [];
 
+    // Check for debug flag
+    const debug = searchParams.get("debug") === "1";
+
     // Hard guard: success response MUST include source:"GRID" and valid teams
-    return NextResponse.json(
-      {
-        success: true,
-        source: "GRID",
-        teams,
-      },
-      { status: 200 }
-    );
+    const responseData: any = {
+      success: true,
+      source: "GRID",
+      teams,
+    };
+
+    if (debug) {
+      responseData.debug = {
+        queryName: "TeamSearch",
+        edgeCount: data.data?.teams?.edges?.length || 0,
+        returnedCount: teams.length,
+      };
+    }
+
+    return NextResponse.json(responseData, { status: 200 });
   } catch (err: any) {
     clearTimeout(timeoutId);
 

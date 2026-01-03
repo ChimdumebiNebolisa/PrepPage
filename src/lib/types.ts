@@ -46,6 +46,21 @@ export interface ScoutResponse {
   source?: "GRID" | string;
   error?: string;
   code?: string;
+  debug?: {
+    totalSeriesFetched?: number;
+    totalSeriesAfterFilter?: number;
+    teamIdUsed?: string;
+    seriesEdges?: Array<{
+      node: {
+        id: string;
+        teams: Array<{
+          baseInfo?: { id: string; name: string };
+          id?: string;
+          name?: string;
+        }>;
+      };
+    }>;
+  };
 }
 
 export interface TeamSearchResponse {
