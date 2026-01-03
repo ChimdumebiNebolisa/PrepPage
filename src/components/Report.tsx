@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { TeamReport } from "@/lib/types";
 
-export default function Report({ report, source }: { report: TeamReport; source: string }) {
+export default function Report({ report, source, debug }: { report: TeamReport; source: string; debug?: any }) {
   const [showEvidence, setShowEvidence] = useState(false);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
 
@@ -55,6 +55,26 @@ export default function Report({ report, source }: { report: TeamReport; source:
     document.body.removeChild(element);
   };
 
+  // Determine data readiness badge
+  let dataReadiness: "Ready" | "Partial" | "Empty" = "Empty";
+  let dataReadinessClass = "bg-gray-500 text-white";
+
+  if (debug) {
+    const hasFilesOrState = (debug.seriesWithFilesCount || 0) > 0 || (debug.seriesWithStateCount || 0) > 0;
+    const hasSeries = (debug.seriesAfterTeamFilter || 0) > 0;
+
+    if (hasFilesOrState) {
+      dataReadiness = "Ready";
+      dataReadinessClass = "bg-green-500 text-white";
+    } else if (hasSeries) {
+      dataReadiness = "Partial";
+      dataReadinessClass = "bg-yellow-500 text-white";
+    }
+  } else if (report.sampleSize > 0) {
+    dataReadiness = "Ready";
+    dataReadinessClass = "bg-green-500 text-white";
+  }
+
   const badgeText = source === "GRID" ? "LIVE" : "DEMO MODE";
   const badgeClass = source === "GRID"
     ? "bg-primary text-primary-foreground"
@@ -72,13 +92,55 @@ export default function Report({ report, source }: { report: TeamReport; source:
               <span>{report.sampleSize} matches</span>
               <span>•</span>
               <span>{report.dateRange}</span>
+              {debug && (
+                <>
+                  <span>•</span>
+                  <span>Before filter: {debug.seriesFetchedBeforeTeamFilter || 0}</span>
+                  <span>•</span>
+                  <span>After filter: {debug.seriesAfterTeamFilter || 0}</span>
+                  {(debug.seriesWithFilesCount !== undefined || debug.seriesWithStateCount !== undefined) && (
+                    <>
+                      <span>•</span>
+                      <span>With files: {debug.seriesWithFilesCount || 0}</span>
+                      <span>•</span>
+                      <span>With state: {debug.seriesWithStateCount || 0}</span>
+                    </>
+                  )}
+                </>
+              )}
             </div>
           </div>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${badgeClass}`}>
-            {badgeText}
-          </span>
+          <div className="flex gap-2 items-center">
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${badgeClass}`}>
+              {badgeText}
+            </span>
+            {debug && (
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${dataReadinessClass}`}>
+                Data: {dataReadiness}
+              </span>
+            )}
+          </div>
         </div>
 
+        {/* Empty State Messages */}
+        {report.sampleSize === 0 && (
+          <div className="mb-6 p-4 border border-yellow-500 rounded-lg bg-yellow-50 dark:bg-yellow-900/20">
+            <h3 className="font-semibold mb-2">No Data Available</h3>
+            {debug?.seriesAfterTeamFilter === 0 ? (
+              <p className="text-sm">
+                No series found for the selected title/tournaments/time window.
+                Try widening the time window or selecting different tournaments.
+              </p>
+            ) : (
+              <p className="text-sm">
+                Series found, but no in-game files/state available.
+                This may be due to access restrictions or the series not having data yet.
+              </p>
+            )}
+          </div>
+        )}
+
+        {report.sampleSize > 0 && (
         <div className="space-y-8">
           {/* Team Tendencies */}
           <section>
@@ -181,6 +243,7 @@ export default function Report({ report, source }: { report: TeamReport; source:
             )}
           </section>
         </div>
+        )}
       </div>
 
       <div className="flex gap-4 justify-center items-center">

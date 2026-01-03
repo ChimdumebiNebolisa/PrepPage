@@ -8,9 +8,30 @@ describe('ScoutingEngine', () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    // Mock titles endpoint - called on mount
+    const mockFetch = vi.fn().mockResolvedValue({
+      json: async () => ({ success: true, titles: [] }),
+      ok: true,
+    });
+    vi.stubGlobal('fetch', mockFetch);
   });
 
   it('shows start typing message when dropdown is open and query is empty', async () => {
+    // Mock fetch to handle titles call
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      return Promise.resolve({
+        json: async () => ({ success: true, teams: [] }),
+        ok: true,
+      });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
     const input = screen.getByPlaceholderText(/start typing/i);
     await userEvent.click(input);
@@ -18,9 +39,19 @@ describe('ScoutingEngine', () => {
   });
 
   it('triggers /api/teams call when typing', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
-      ok: true,
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      // Handle titles fetch on mount
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      // Handle teams search
+      return Promise.resolve({
+        json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
+        ok: true,
+      });
     });
     vi.stubGlobal('fetch', mockFetch);
 
@@ -34,9 +65,17 @@ describe('ScoutingEngine', () => {
   });
 
   it('shows LIVE SEARCH indicator when /api/teams returns success:true', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
-      ok: true,
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      return Promise.resolve({
+        json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
+        ok: true,
+      });
     });
     vi.stubGlobal('fetch', mockFetch);
 
@@ -51,9 +90,23 @@ describe('ScoutingEngine', () => {
   });
 
   it('shows MISSING_API_KEY notice when API key is missing', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      json: async () => ({ success: false, code: 'MISSING_API_KEY', teams: [] }),
-      ok: true,
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      if (url.includes('/api/teams')) {
+        return Promise.resolve({
+          json: async () => ({ success: false, code: 'MISSING_API_KEY', teams: [] }),
+          ok: true,
+        });
+      }
+      return Promise.resolve({
+        json: async () => ({}),
+        ok: true,
+      });
     });
     vi.stubGlobal('fetch', mockFetch);
 
@@ -67,23 +120,47 @@ describe('ScoutingEngine', () => {
   });
 
   it('does not call API when query is empty', async () => {
-    const mockFetch = vi.fn();
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      // Allow titles fetch on mount (expected)
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      // Should not be called for teams when query is empty
+      return Promise.resolve({
+        json: async () => ({ success: true, teams: [] }),
+        ok: true,
+      });
+    });
     vi.stubGlobal('fetch', mockFetch);
 
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
     const input = screen.getByPlaceholderText(/start typing/i);
     await userEvent.click(input);
 
-    // Wait a bit to ensure no API call
+    // Wait a bit to ensure no teams API call
     await new Promise(resolve => setTimeout(resolve, 300));
 
-    expect(mockFetch).not.toHaveBeenCalled();
+    // Should only have titles call, no teams call
+    const calls = mockFetch.mock.calls.map(([url]) => url);
+    const teamsCalls = calls.filter((url: string) => url?.includes('/api/teams'));
+    expect(teamsCalls.length).toBe(0);
   });
 
   it('selects team and closes dropdown on click', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
-      ok: true,
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      return Promise.resolve({
+        json: async () => ({ success: true, source: 'GRID', teams: [{ id: '1', name: 'Team1' }] }),
+        ok: true,
+      });
     });
     vi.stubGlobal('fetch', mockFetch);
 
@@ -104,15 +181,30 @@ describe('ScoutingEngine', () => {
   });
 
   it('sends POST /api/scout with teamId on Generate Report', async () => {
-    const mockFetch = vi.fn()
-      .mockResolvedValueOnce({
-        json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
-        ok: true,
-      })
-      .mockResolvedValueOnce({
-        json: async () => ({ success: true, source: 'GRID', data: { teamName: 'Team1', region: 'NA', lastUpdated: '2026-01-01', sampleSize: 10, dateRange: 'Last 30 days', tendencies: [], players: [], compositions: [], evidence: [] } }),
+    const mockFetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      if (url.includes('/api/teams')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
+          ok: true,
+        });
+      }
+      if (url.includes('/api/scout') && options?.method === 'POST') {
+        return Promise.resolve({
+          json: async () => ({ success: true, source: 'GRID', data: { teamName: 'Team1', region: 'NA', lastUpdated: '2026-01-01', sampleSize: 10, dateRange: 'Last 30 days', tendencies: [], players: [], compositions: [], evidence: [] } }),
+          ok: true,
+        });
+      }
+      return Promise.resolve({
+        json: async () => ({}),
         ok: true,
       });
+    });
     vi.stubGlobal('fetch', mockFetch);
 
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
@@ -130,10 +222,11 @@ describe('ScoutingEngine', () => {
       expect(mockFetch).toHaveBeenCalledWith('/api/scout', expect.objectContaining({
         method: 'POST',
       }));
-      expect(mockOnReportGenerated).toHaveBeenCalledWith(
-        expect.objectContaining({ teamName: 'Team1' }),
-        'GRID'
-      );
+      expect(mockOnReportGenerated).toHaveBeenCalled();
+      const callArgs = mockOnReportGenerated.mock.calls[0];
+      expect(callArgs[0]).toMatchObject({ teamName: 'Team1' });
+      expect(callArgs[1]).toBe('GRID');
+      // debug is optional third parameter
     });
   });
 
@@ -154,19 +247,36 @@ describe('ScoutingEngine', () => {
       },
     };
 
-    const mockFetch = vi.fn()
-      .mockResolvedValueOnce({
-        json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
-        ok: true,
-      })
-      .mockResolvedValueOnce({
-        json: async () => ({ success: false, code: 'GRID_FETCH_FAILED' }),
-        ok: false,
-      })
-      .mockResolvedValueOnce({
-        json: async () => mockDemoData,
+    const mockFetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      if (url.includes('/api/teams')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
+          ok: true,
+        });
+      }
+      if (url.includes('/api/scout') && options?.method === 'POST') {
+        return Promise.resolve({
+          json: async () => ({ success: false, code: 'GRID_FETCH_FAILED' }),
+          ok: false,
+        });
+      }
+      if (url.includes('/demo-data.json')) {
+        return Promise.resolve({
+          json: async () => mockDemoData,
+          ok: true,
+        });
+      }
+      return Promise.resolve({
+        json: async () => ({}),
         ok: true,
       });
+    });
     vi.stubGlobal('fetch', mockFetch);
 
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
@@ -210,19 +320,36 @@ describe('ScoutingEngine', () => {
       },
     };
 
-    const mockFetch = vi.fn()
-      .mockResolvedValueOnce({
-        json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
-        ok: true,
-      })
-      .mockResolvedValueOnce({
-        json: async () => ({ success: false, code: 'GRID_FETCH_FAILED' }),
-        ok: false,
-      })
-      .mockResolvedValueOnce({
-        json: async () => mockDemoData,
+    const mockFetch = vi.fn().mockImplementation((url: string, options?: any) => {
+      if (url.includes('/api/grid/titles')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, titles: [] }),
+          ok: true,
+        });
+      }
+      if (url.includes('/api/teams')) {
+        return Promise.resolve({
+          json: async () => ({ success: true, source: 'GRID', teams: [{ id: '80', name: 'Team1' }] }),
+          ok: true,
+        });
+      }
+      if (url.includes('/api/scout') && options?.method === 'POST') {
+        return Promise.resolve({
+          json: async () => ({ success: false, code: 'GRID_FETCH_FAILED' }),
+          ok: false,
+        });
+      }
+      if (url.includes('/demo-data.json')) {
+        return Promise.resolve({
+          json: async () => mockDemoData,
+          ok: true,
+        });
+      }
+      return Promise.resolve({
+        json: async () => ({}),
         ok: true,
       });
+    });
     vi.stubGlobal('fetch', mockFetch);
 
     render(<ScoutingEngine onReportGenerated={mockOnReportGenerated} />);
